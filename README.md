@@ -8,6 +8,8 @@ Warning and Critical thresholds can be set for when readings are outside preset 
 
 More documentation can be found at <a href="https://conferre.cf">https://conferre.cf</a>
 
+The Arduino IDE environment is used to compile the code.
+
 User interface
 ==============
 The xymon web interface is used as the user interface.
