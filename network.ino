@@ -33,6 +33,8 @@ SOFTWARE.
 
 static WiFiMulti wifiMulti;
 
+static bool wifi_initiated = false;
+
 /*
  * Connect to network using stored settings
  */
@@ -45,6 +47,17 @@ bool net_connect()
   int use_multiwifi = 1;
 
   if (WiFi.status() == WL_CONNECTED) return (true);
+  if (wifi_initiated) {
+    if (ansiTerm) displayAnsi (3);
+    consolewriteln ("WiFi resume from sleep");
+    if (ansiTerm) displayAnsi (1);
+    WiFi.mode(WIFI_STA);
+    WiFi.reconnect();
+    for (uint8_t z; z<10 ; z++) {
+      if (z!=0) delay(1000);
+      if (WiFi.status() == WL_CONNECTED) return (true);
+    }
+  }
 //  WiFi.mode(WIFI_ON);
   use_multiwifi = nvs_get_int ("use_multiwifi", 1);
   if (network_count == 0) {
@@ -71,13 +84,17 @@ bool net_connect()
       }
     }
   }
+  WiFi.setHostname(device_name);
   if (use_multiwifi==1 && network_count > 1) {
     for (int loops = CONNECT_RETRIES; loops > 0 && !net_connected; loops--) {
       if (wifiMulti.run() == WL_CONNECTED) {
         if (ansiTerm) displayAnsi (3);
-        consolewriteln ("\nWiFi connected");
+        consolewrite ("\nWiFi connected - scanned: ");
+        WiFi.SSID().toCharArray(msgBuffer, sizeof(msgBuffer));
+        consolewriteln (msgBuffer);
         if (ansiTerm) displayAnsi (1);
         net_connected = true;
+        wifi_initiated = true;
         break;
       }
       else delay(10000);
@@ -113,15 +130,16 @@ bool net_single_connect()
 
   if (WiFi.status() == WL_CONNECTED) return (true);
   for (int loops = CONNECT_RETRIES; loops>0 && !net_connected; loops--) {
-    for (int n=0; n<4 && !net_connected; n++) {
+    for (uint8_t n=0; n<4 && !net_connected; n++) {
       if (strcmp (wifi_ssid[n], "none") != 0) {
         if (strcmp (wifi_passwd[n], "none") == 0) WiFi.begin(wifi_ssid[n], NULL);
         else WiFi.begin(wifi_ssid[n], wifi_passwd[n]);
         WiFi.setHostname(device_name);
         delay (1000);
-        if (WiFi.status() != WL_CONNECTED) delay (9000);
+        for (uint8_t z=0; z<14 && WiFi.status() != WL_CONNECTED; z++) delay (1000);
         if (WiFi.status() == WL_CONNECTED) net_connected = true;
         if (net_connected) {
+          wifi_initiated = true;
           if (ansiTerm) displayAnsi (3);
           consolewrite ("\nWiFi connected: ");
           WiFi.SSID().toCharArray(msgBuffer, sizeof(msgBuffer));
@@ -149,14 +167,14 @@ void net_disconnect()
   if (wifimode != 0 && networkUserCount<1 && WiFi.status() == WL_CONNECTED) {
     // wait for grace period flush time
     // avoid un-necessary disconnects
-    for (char n =0; n<CONNECT_RETRIES; n++) {
+    for (uint8_t n=0; n<CONNECT_RETRIES && disconn; n++) {
       delay (1000);
       if (networkUserCount>0) disconn = false;
     }
     if (disconn) {
       WiFi.disconnect();
       WiFi.mode(WIFI_OFF);
-      WiFi.~WiFiClass();
+      // WiFi.~WiFiClass();
       if (ansiTerm) displayAnsi (3);
       consolewriteln ("WiFi disconnected");
       if (ansiTerm) displayAnsi (1);

@@ -55,7 +55,7 @@ SOFTWARE.
  *   Use build date as build number
  */
 #define PROJECT_NAME "HydraFerret"
-#define VERSION "21.04"
+#define VERSION "21.10rc1"
 
 // Name of Console log file
 #define CONSOLELOG "/console.log"
@@ -70,6 +70,12 @@ SOFTWARE.
 
 // Maximum one wire busses to support
 #define MAX_ONEWIRE 4
+
+// The interval in miliseconds between initiating each device type
+// The idea is to provide some separation between sensors accessing the I2C
+// busses to avoid contention, so it should not be a simple multiple where
+// overlap is likely to happen.
+#define INIT_DELAY 38
 
 // Default monitoring interval
 // NB some devices such as CO2 measurement should not run less frequently
@@ -108,7 +114,10 @@ SOFTWARE.
 #define SENSOR_NAME_LEN 17
 
 // Maximum number of outputs
-#define MAX_OUTPUT 8
+#define MAX_OUTPUT 10
+
+// Maximum number of switches
+#define MAX_SWITCH 10
 
 // Size of input buffer
 #define BUFFSIZE 128
@@ -362,8 +371,8 @@ struct pms5003_s {
   uint16_t count;
   uint16_t avgOver;
   uint16_t checksum;
-  int16_t byteCount;
-  uint8_t msgBuffer[32];
+  int16_t  byteCount;
+  uint8_t  msgBuffer[32];
 };
 
 struct winsen_s {
@@ -372,23 +381,36 @@ struct winsen_s {
   uint16_t lastData[2];
   uint16_t count;
   uint16_t avgOver;
-  uint8_t msgBuffer[9];
-  uint8_t devType;
-  uint8_t unit;
-  uint8_t byteCount;
+  uint8_t  msgBuffer[9];
+  uint8_t  devType;
+  uint8_t  unit;
+  uint8_t  byteCount;
 };
+
+struct switch_s {
+  struct   rpnLogic_s *alert[3];   // rpn logic pointers
+  float    average;
+  uint16_t readingCount;
+  uint16_t averagedOver;
+  uint16_t accumulator;
+  uint8_t  pinNumber;
+  uint8_t  lastVal;
+  uint8_t  state;                 // green, yellow or red indication
+  char     uniquename[SENSOR_NAME_LEN];
+};
+
 
 // Structures used for output and logic control
 struct output_s {
-  struct rpnLogic_s *alert[3];
+  struct  rpnLogic_s *outputLogic;
+  struct  rpnLogic_s *alert[3];
+  float   result = 0.0;
+  float   defaultVal = 0.0;
   uint8_t outputPin;
   uint8_t outputType;      // eg relay or pwm
   uint8_t initialised;
   uint8_t state;
-  char uniquename[SENSOR_NAME_LEN];
-  float result = 0.0;
-  float defaultVal = 0.0;
-  struct rpnLogic_s *outputLogic;
+  char    uniquename[SENSOR_NAME_LEN];
 };
 
 struct rpnLogic_s {
@@ -396,3 +418,9 @@ struct rpnLogic_s {
   uint16_t size;
   char *term[3];
 };
+
+
+/*
+ * Add prototypes for calls where required
+ */
+// static void generalTimerHandler (TimerHandle_t xTimer);

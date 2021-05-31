@@ -46,11 +46,17 @@ class hdc1080 {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("hdc1080");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct hdc1080_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust hdc1080 temperature poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval+1000)) == pdTRUE) {
           for (int device=0; device <devTypeCount[myDevTypeID]; device++) {
@@ -254,7 +260,7 @@ class hdc1080 {
       uint8_t retVal  = GREEN;    // Worst score for all tests of this type
       uint8_t testVal = GREEN;    // Score for the currently evaluated sensor
       uint8_t tStart, tEnd, idx;  // indexes to pointers for tests taken
-      struct hdc1080_s *myData;    // Pointer to data.
+      struct hdc1080_s *myData;   // Pointer to data.
 
       switch (testType) {
         case TEMP:  tStart = 0; tEnd = 3; idx = 0; break;
@@ -269,13 +275,13 @@ class hdc1080 {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = (innerloop-tStart)+1;
           }
-          retVal = testVal;
+          if (testVal > retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state[idx] = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

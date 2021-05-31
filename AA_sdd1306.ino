@@ -45,11 +45,16 @@ class sdd1306 {
       for (char n=0; n<4; n++) displayBuffer[n][0] = '\0';
       myDevTypeID = util_get_dev_type("sdd1306");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct sdd1306_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust sdd1306 display poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          }
         queueData = myDevTypeID;
         iterType = 0;
         iterDev = 0;

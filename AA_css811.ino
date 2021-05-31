@@ -47,6 +47,7 @@ class css811 {
       myDevTypeID = util_get_dev_type("css811");
       if (myDevTypeID!=255) {
         // set up polling intervals
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct css811_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
@@ -55,6 +56,11 @@ class css811 {
         else measurementMode = 0x30;                        // once a minute
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust css811 CO2 poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         // clear counters and reset sensor
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
@@ -499,13 +505,13 @@ class css811 {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = (innerloop-tStart)+YELLOW;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state[idx] = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

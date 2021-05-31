@@ -222,7 +222,7 @@ void displayAnsi (int index)
 {
   uint8_t lim;
 
-  if (xSemaphoreTake(consoleSemaphore, pdMS_TO_TICKS(1000)) == pdTRUE) {
+  if (xSemaphoreTake(consoleSemaphore, pdMS_TO_TICKS(5000)) == pdTRUE) {
     consolewriteNoSem ((uint8_t) 27);
     consolewriteNoSem ((uint8_t) '[');
     lim=strlen((char*) ansiString[index]);
@@ -817,6 +817,7 @@ void mt_parse_command (char *cmdBuffer)
   else if ((nparam==1 || nparam==4) && strcmp (param[0], "opacity") == 0) mt_set_opacity (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "ota") == 0)       mt_ota           (nparam, param);
   else if (nparam!=2 && strcmp (param[0], "output") == 0)    mt_output        (nparam, param);
+  else if (nparam<=2 && strcmp (param[0], "outputiwait") == 0) mt_outputWait  (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "password") == 0)  mt_set_password  (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "quit") == 0)      mt_quit          (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "qnh") == 0)       mt_set_qnh       (nparam, param);
@@ -826,6 +827,7 @@ void mt_parse_command (char *cmdBuffer)
   else if (nparam>1  && strcmp (param[0], "rpn") == 0)       rpn_calc         (nparam, param);
   else if ((nparam==1 || nparam==3 || (nparam>=4 && nparam<=6)) && strcmp (param[0], "serial")==0) mt_serial (nparam, param);
   else if (nparam==1 && strcmp (param[0], "scan") == 0)      util_i2c_scan();
+  else if ((nparam==1 || nparam == 3) && strcmp (param[0], "switch") == 0)  mt_switch (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "telnet") == 0)    mt_telnet        (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "terminate") == 0) mt_set_terminate (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "timezone") == 0)  mt_set_timezone  (nparam, param);
@@ -1257,6 +1259,7 @@ void mt_inventory(int nparam, char **param)
   the_ina2xx.inventory();
   the_veml6075.inventory();
   the_serial.inventory();
+  the_switch.inventory();
   the_sdd1306.inventory();
 }
 
@@ -1455,6 +1458,7 @@ else if (nparam == 4) {
       else if (strcmp ("ina2xx",    param[1]) == 0) strcpy(((struct ina2xx_s*)      devData)[n].uniquename, param[3]);
       else if (strcmp ("output",    param[1]) == 0) strcpy(((struct output_s*)      devData)[n].uniquename, param[3]);
       else if (strcmp ("serial",    param[1]) == 0) strcpy(((struct zebSerial_s*)   devData)[n].uniquename, param[3]);
+      else if (strcmp ("switch",    param[1]) == 0) strcpy(((struct switch_s*)      devData)[n].uniquename, param[3]);
       }
     else {
       if (strcmp ("ds1820", param[1]) != 0) {
@@ -1662,6 +1666,48 @@ void mt_serial (int nparam, char **param)
 
 
 /*
+ * Set up switch inputs
+ */
+void mt_switch (int nparam, char **param)
+{
+  char paramName[25];
+  char msgBuffer[25];
+
+  uint8_t pin, swNr;
+
+  if (nparam == 1) {
+    the_switch.inventory();
+  }
+  else if (util_str_isa_int (param[1])) {
+    swNr = util_str2int (param[1]);
+    if (util_str_isa_int (param[2])) {
+      pin = util_str2int (param[2]);
+      if (pin<40 && pin>=0) {
+        sprintf (paramName, "switchPin_%d", swNr);
+        nvs_put_int (paramName, pin);
+      }
+      else {
+        if (ansiTerm) displayAnsi(3);
+        consolewriteln ("Switch pin should be 0-39.");
+      }
+    }
+    else if (strcmp(param[2], "disable") == 0) {
+      sprintf (paramName, "switchPin_%d", swNr);
+      nvs_put_int (paramName, 99);
+    }
+    else {
+      if (ansiTerm) displayAnsi(3);
+      consolewriteln ("2nd parameter should be pin number or either high or low.");
+    }
+  }
+  else {
+    if (ansiTerm) displayAnsi(3);
+    consolewriteln ("Switch number should be numeric.");
+  }
+}
+
+
+/*
  * Dump structures
  */
 void mt_dump (int nparam, char **param)
@@ -1748,6 +1794,9 @@ void mt_dump (int nparam, char **param)
   }
   else if (strcmp(param[1], "ina2xx") == 0) {
     for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct ina2xx_s*)       devData[tPtr])[dPtr]), sizeof(struct ina2xx_s));
+  }
+  else if (strcmp(param[1], "switch") == 0) {
+    for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct switch_s*)       devData[tPtr])[dPtr]), sizeof(struct switch_s));
   }
   else if (strcmp(param[1], "veml6075") == 0) {
     for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) {
@@ -1960,6 +2009,7 @@ void mt_list (int nparam, char **param)
         else if (strcmp (devType[n], "counter")  == 0) theCounter.printData();
         else if (strcmp (devType[n], "output")   == 0) the_output.printData();
         else if (strcmp (devType[n], "serial")   == 0) the_serial.printData();
+        else if (strcmp (devType[n], "switch")   == 0) the_switch.printData();
         else if (strcmp (devType[n], "adc")      == 0) the_adc.printData();
       }
     }
@@ -2101,6 +2151,28 @@ void mt_ota (int nparam, char **param)
 /* 
  *  Handle output configuration
  */
+void mt_outputWait (int nparam, char **param)
+{
+  uint16_t waitSecs;
+  
+  if (nparam == 0) {
+    char msgBuffer[40];
+    waitSecs = nvs_get_int ("outputWaitSec", 300);
+    sprintf (msgBuffer, " * Output wait: %d seconds", waitSecs);
+    consolewriteln (msgBuffer);  
+  }
+  else {
+    if (util_str_isa_int (param[1])) {
+      waitSecs = util_str2int(param[1]);
+      if (waitSecs > 0 && waitSecs<= 3600) {
+        nvs_put_int ("outputWaitSec", waitSecs);
+      }
+      else consolewriteln ("Output delay should be between 1 and 3600 seconds");
+    }
+  }
+}
+
+
 void mt_output (int nparam, char **param)
 {
   uint8_t outDeviceType = util_get_dev_type("output");
@@ -2964,6 +3036,7 @@ void mt_set_alert (int nparam, char **param)
         else if (strcmp (devType[devx], "output")   == 0) { subLimit = the_output.subtypeLen;   subDesc = &(the_output.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "ds1820")   == 0) { subLimit = the_wire.subtypeLen;     subDesc = &(the_wire.subtypeList[0][0]);     }
         else if (strcmp (devType[devx], "serial")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_serial.subtypeList[0][0]);   }
+        else if (strcmp (devType[devx], "switch")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_switch.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "adc")      == 0) { subLimit = the_adc.subtypeLen;      subDesc = &(the_adc.subtypeList[0][0]);      start = 32 ; endpt = 40; }
       // }
       // format of name is first four letters of device type + variable name + warning/crit/extreme index + device number,
@@ -3007,6 +3080,7 @@ void mt_set_alert (int nparam, char **param)
           else if (strcmp (param[1], "output")   == 0) { subLimit = the_output.subtypeLen;   subDesc = &(the_output.subtypeList[0][0]);   }
           else if (strcmp (param[1], "ds1820")   == 0) { subLimit = the_wire.subtypeLen;     subDesc = &(the_wire.subtypeList[0][0]);     }
           else if (strcmp (param[1], "serial")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_serial.subtypeList[0][0]);   }
+          else if (strcmp (param[1], "switch")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_switch.subtypeList[0][0]);   }
           else if (strcmp (param[1], "adc")      == 0) { subLimit = the_adc.subtypeLen;      subDesc = &(the_adc.subtypeList[0][0]);      }
           for (char limit=0; limit<subLimit && isOK==0; limit++) {
             tPtr = subDesc + (limit * 5);
@@ -3057,84 +3131,114 @@ void mt_set_alert (int nparam, char **param)
 
 void mt_help(char *query)
 {
+  bool fullList = true;
+
+  if (query!=NULL && strcmp (query, "summary") == 0) {
+    query = NULL;
+    fullList = false;
+  }
   if (query==NULL || strcmp(query, "adc") == 0) {
     consolewriteln ((const char*) "adc [<pin> disable]");
     consolewriteln ((const char*) "adc [<pin> <unit-of-measure> <attenuation> <offset> <multiplier>]");
-    consolewriteln ((const char*) "    Configure adc (Analogue to Digital Conversion)");
-    consolewriteln ((const char*) "    NB: pin number must be in range 32-39");
-    consolewriteln ((const char*) "        attenuation range 0-3 sets FSD: 0=800mV, 1=1.1V, 2=1.35V, 3=2.6V");
-    consolewriteln ((const char*) "        voltages beyond those indicated may produce non-linear results");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure adc (Analogue to Digital Conversion)");
+      consolewriteln ((const char*) "    NB: pin number must be in range 32-39");
+      consolewriteln ((const char*) "        attenuation range 0-3 sets FSD: 0=800mV, 1=1.1V, 2=1.35V, 3=2.6V");
+      consolewriteln ((const char*) "        voltages beyond those indicated may produce non-linear results");
+    }
   }
   if (query==NULL || strcmp(query, "altitude") == 0) {
     consolewriteln ((const char*) "altitude [<altitude> [m|ft]]");
-    consolewriteln ((const char*) "    Set altitude of unit for pressure compensation");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set altitude of unit for pressure compensation");
+    }
   }
   if (query==NULL || strcmp(query, "ansi") == 0) {
     consolewriteln ((const char*) "ansi [{bold|command|error|normal|time} <attribute-list>]");
     consolewriteln ((const char*) "ansi [test]");
-    consolewriteln ((const char*) "    Set colour attributes when ANSI colourisation is enabled");
-    consolewriteln ((const char*) "    Attribute-list is a semicolon separated list of the following:");
-    consolewriteln ((const char*) "    Attributes: support may vary between terminal types");
-    consolewriteln ((const char*) "        0 - reset       1 - bold      3 - italic     4 - underline");
-    consolewriteln ((const char*) "        5 - blink       7 - reverse video            9 - strikeout");
-    consolewriteln ((const char*) "    Colours: \"30 + number\" for text, \"40 + number\" for background");
-    consolewriteln ((const char*) "        0 - black       1 - red       2 - green      3 - yellow");
-    consolewriteln ((const char*) "        4 - purple      5 - purple    6 - cyan       7 - white");
-    consolewriteln ((const char*) "    \"test\" gives a preview of the colour combinations described above");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set colour attributes when ANSI colourisation is enabled");
+      consolewriteln ((const char*) "    Attribute-list is a semicolon separated list of the following:");
+      consolewriteln ((const char*) "    Attributes: support may vary between terminal types");
+      consolewriteln ((const char*) "        0 - reset       1 - bold      3 - italic     4 - underline");
+      consolewriteln ((const char*) "        5 - blink       7 - reverse video            9 - strikeout");
+      consolewriteln ((const char*) "    Colours: \"30 + number\" for text, \"40 + number\" for background");
+      consolewriteln ((const char*) "        0 - black       1 - red       2 - green      3 - yellow");
+      consolewriteln ((const char*) "        4 - purple      5 - purple    6 - cyan       7 - white");
+      consolewriteln ((const char*) "    \"test\" gives a preview of the colour combinations described above");
+    }
   }
 #ifdef USE_BLUETOOTH
   if (query==NULL || strcmp(query, "bluetooth") == 0) {
     consolewriteln ((const char*) "bluetooth [<pin>|none|disable]");
-    consolewriteln ((const char*) "    Enable with 4 digit pin or no pin or disable Bluetooth serial console");
+    if (fullList) {
+      consolewriteln ((const char*) "    Enable with 4 digit pin or no pin or disable Bluetooth serial console");
+    }
   }
 #endif
   if (query==NULL || strcmp(query, "cert") == 0) {
     consolewriteln ((const char*) "cert [{ota|xymon} <fileName>]");
-    consolewriteln ((const char*) "    Certificate file to use if using https for transfers");
+    if (fullList) {
+      consolewriteln ((const char*) "    Certificate file to use if using https for transfers");
+    }
   }
   if (query==NULL || strcmp(query, "clear") == 0) {
     consolewriteln ((const char*) "clear");
-    consolewriteln ((const char*) "    Clear terminal contents");
+    if (fullList) {
+      consolewriteln ((const char*) "    Clear terminal contents");
+    }
   }
   if (query==NULL || strcmp(query, "combine") == 0) {
     consolewriteln ((const char*) "combine [<unitName>]");
-    consolewriteln ((const char*) "    Combine graphs from this unit with <unitName>");
+    if (fullList) {
+      consolewriteln ((const char*) "    Combine graphs from this unit with <unitName>");
+    }
   }
   if (query==NULL || strcmp(query, "compensate") == 0) {
     consolewriteln ((const char*) "compensate [css811 <n> [hdc1080|bme280] <i>]");
-    consolewriteln ((const char*) "    Apply temperature compensation to css811[n] from device[i]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Apply temperature compensation to css811[n] from device[i]");
+    }
   }
   if (query==NULL || strcmp(query, "config") == 0) {
     consolewriteln ((const char*) "config");
-    consolewriteln ((const char*) "    Display configuration");
+    if (fullList) {
+      consolewriteln ((const char*) "    Display basic configuration");
+    }
   }
   if (query==NULL || strcmp(query, "constant") == 0) {
     consolewriteln ((const char*) "constant [<0-9> <value> [<label]]");
-    consolewriteln ((const char*) "    define a constant against memory index and optionally label it.");
-    consolewriteln ((const char*) "    recall using rpn calculator with\"k\" operator, eg: \"rpn adc.var 7 k *\"");
-    consolewriteln ((const char*) "    The label may be up to 20 chars long, it is only displayed by \"constant\"");
+    if (fullList) {
+      consolewriteln ((const char*) "    define a constant against memory index and optionally label it.");
+      consolewriteln ((const char*) "    recall using rpn calculator with\"k\" operator, eg: \"rpn adc.var 7 k *\"");
+      consolewriteln ((const char*) "    The label may be up to 20 chars long, it is only displayed by \"constant\"");
+    }
   }
   if (query==NULL || strcmp(query, "counter") == 0) {
     consolewriteln ((const char*) "counter <0-7> disable");
     consolewriteln ((const char*) "counter <0-7> <0-39> <unique-name> <unit_of_measure> <offset> <multiplier>");
-    consolewriteln ((const char*) "    configure counter <0-3> on pin <0-39> with a unique name/identifier with a");
-    consolewriteln ((const char*) "    straight line conversion of <offset> and <multiplier> (default 0.0 and 1.0)");
+    if (fullList) {
+      consolewriteln ((const char*) "    configure counter <0-3> on pin <0-39> with a unique name/identifier with a");
+      consolewriteln ((const char*) "    straight line conversion of <offset> and <multiplier> (default 0.0 and 1.0)");
+    }
   }
   if (query==NULL || strcmp(query, "critical") == 0 || strcmp(query, "extreme") == 0 || strcmp(query, "warning") == 0) {
     consolewriteln ((const char*) "critical|extreme|warning <devicetype> <0-n> <val> disable");
     consolewriteln ((const char*) "critical|extreme|warning <devicetype> <0-n> <val> <rpn-expression>");
-    consolewriteln ((const char*) "    enable or disable alerting thresholds on sensors");
-    consolewriteln ((const char*) "    Use \"inventory\" to list devicetype, val follows first 4 letters of test");
-    consolewriteln ((const char*) "      adc:      adc");
-    consolewriteln ((const char*) "      bh1750:   lux");
-    consolewriteln ((const char*) "      bme280:   temp, humi, pres");
-    consolewriteln ((const char*) "      counter:  var");
-    consolewriteln ((const char*) "      css811:   co2, tvoc");
-    consolewriteln ((const char*) "      ds1820:   temp");
-    consolewriteln ((const char*) "      ina2xx:   amps, volt, watt");
-    consolewriteln ((const char*) "      veml6075: uv");
-    consolewriteln ((const char*) "      output:   outp");
-    consolewriteln ((const char*) "      serial:   var");
+    if (fullList) {
+      consolewriteln ((const char*) "    enable or disable alerting thresholds on sensors");
+      consolewriteln ((const char*) "    Use \"inventory\" to list devicetype, val follows first 4 letters of test");
+      consolewriteln ((const char*) "      adc:      adc");
+      consolewriteln ((const char*) "      bh1750:   lux");
+      consolewriteln ((const char*) "      bme280:   temp, humi, pres");
+      consolewriteln ((const char*) "      counter:  var");
+      consolewriteln ((const char*) "      css811:   co2, tvoc");
+      consolewriteln ((const char*) "      ds1820:   temp");
+      consolewriteln ((const char*) "      ina2xx:   amps, volt, watt");
+      consolewriteln ((const char*) "      veml6075: uv");
+      consolewriteln ((const char*) "      output:   outp");
+      consolewriteln ((const char*) "      serial:   var");
+    }
   }
   if (query==NULL || strcmp(query, "cpuspeed") == 0) {
     consolewrite   ((const char*) "cpuspeed [240|160|80");
@@ -3150,189 +3254,284 @@ void mt_help(char *query)
     }
 #endif
     consolewriteln ((const char*) "|0]");
-    consolewriteln ((const char*) "    Set CPU speed in MHz, try to use the lowest viable to save power consumption");
-    consolewriteln ((const char*) "    Use zero to use factory default speed");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set CPU speed in MHz, try to use the lowest viable to save power consumption");
+      consolewriteln ((const char*) "    Use zero to use factory default speed");
+    }
   }
   if (query==NULL || strcmp(query, "del") == 0) {
     consolewriteln ((const char*) "del <filename>");
-    consolewriteln ((const char*) "    Delete a file");
+    if (fullList) {
+      consolewriteln ((const char*) "    Delete a file");
+    }
   }
   if (query==NULL || strcmp(query, "devicename") == 0) {
     consolewriteln ((const char*) "devicename [<device-name>]");
-    consolewriteln ((const char*) "    Set unique device name to identify this unit (16 char max length, avoid spaces)");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set unique device name to identify this unit (16 char max length, avoid spaces)");
+    }
     consolewriteln ((const char*) "devicename <devicetype> <0-n> <device-name>");
-    consolewriteln ((const char*) "    Name a sensor device, use \"inventory\" to list device types");
+    if (fullList) {
+      consolewriteln ((const char*) "    Name a sensor device, use \"inventory\" to list device types");
+    }
   }
   if (query==NULL || strcmp(query, "dewpoint") == 0) {
     consolewriteln ((const char*) "dewpoint [bme280|hdc1080] <0-n> <dewpointname|\"none\">");
-    consolewriteln ((const char*) "    Name a dew point for a temperature sensor, or use none to disable");
+    if (fullList) {
+      consolewriteln ((const char*) "    Name a dew point for a temperature sensor, or use none to disable");
+    }
   }
   if (query==NULL || strcmp(query, "dir") == 0) {
     consolewriteln ((const char*) "dir");
-    consolewriteln ((const char*) "    Directory listing of file system");
+    if (fullList) {
+      consolewriteln ((const char*) "    Directory listing of file system");
+    }
   }
   if (query==NULL || strcmp(query, "dump") == 0) {
     consolewriteln ((const char*) "dump <devicetype>");
-    consolewriteln ((const char*) "    Dump raw data held for a device type, use \"list devices\" to list types");
+    if (fullList) {
+      consolewriteln ((const char*) "    Dump raw data held for a device type, use \"list devices\" to list types");
+    }
   }
   if (query==NULL || strcmp(query, "enable") == 0 || strcmp(query, "disable") == 0) {
     consolewriteln ((const char*) "[enable|disable] [ansi|consolelog|memory|otaonboot|showlogic|startupdelay|telnet]");
-    consolewriteln ((const char*) "    Enable or disable ANSI colourisation of console text");
-    consolewriteln ((const char*) "    Enable or disable logging of console input to /console.log");
-    consolewriteln ((const char*) "    Enable or disable display of memory settings");
-    consolewriteln ((const char*) "    Enable or disable check for over the air (ota) update on booting");
-    consolewriteln ((const char*) "    Enable or disable display of rpn logic for alerts");
-    consolewriteln ((const char*) "    Enable or disable 30 second delay on start");
-    consolewriteln ((const char*) "    Enable or disable telnet service");
+    if (fullList) {
+      consolewriteln ((const char*) "    Enable or disable ANSI colourisation of console text");
+      consolewriteln ((const char*) "    Enable or disable logging of console input to /console.log");
+      consolewriteln ((const char*) "    Enable or disable display of memory settings");
+      consolewriteln ((const char*) "    Enable or disable check for over the air (ota) update on booting");
+      consolewriteln ((const char*) "    Enable or disable display of rpn logic for alerts");
+      consolewriteln ((const char*) "    Enable or disable 30 second delay on start");
+      consolewriteln ((const char*) "    Enable or disable telnet service");
+    }
   }
   if (query==NULL || strcmp(query, "erase") == 0) {
     consolewriteln ((const char*) "erase config");
-    consolewriteln ((const char*) "    Erase all configuration settings and restart");
+    if (fullList) {
+      consolewriteln ((const char*) "    Erase all configuration settings and restart");
+    }
   }
   if (query==NULL || strcmp(query, "help") == 0) {
-    consolewriteln ((const char*) "help [<command>]");
-    consolewriteln ((const char*) "    Display list of command and brief description");
+    consolewriteln ((const char*) "help [<command>|\"summary\"]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Display list of command and brief description");
+    }
   }
   if (query==NULL || strcmp(query, "hibernate") == 0) {
     consolewriteln ((const char*) "hibernate <number> [mins|hours|days]");
-    consolewriteln ((const char*) "    Go to deep sleep from now for a period of time, default time measure is mins");
+    if (fullList) {
+      consolewriteln ((const char*) "    Go to deep sleep from now for a period of time, default time measure is mins");
+    }
     consolewriteln ((const char*) "hibernate [<start> <end>]");
-    consolewriteln ((const char*) "    Go to deep sleep daily between start and end times in hh:mm format");
-    consolewriteln ((const char*) "    disabled if start and end times match");
+    if (fullList) {
+      consolewriteln ((const char*) "    Go to deep sleep daily between start and end times in hh:mm format");
+      consolewriteln ((const char*) "    disabled if start and end times match");
+    }
   }
   if (query==NULL || strcmp(query, "history") == 0) {
     consolewriteln ((const char*) "history");
-    consolewriteln ((const char*) "    Display recent command line history");
+    if (fullList) {
+      consolewriteln ((const char*) "    Display recent command line history");
+    }
   }
   if (query==NULL || strcmp(query, "i2c") == 0) {
     consolewriteln ((const char*) "i2c [<0-1> <sda> <scl> [speed]]");
-    consolewriteln ((const char*) "    Set i2c pins, eg: 21 and 22 for bus-0, and 5 and 4 for bus-1");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set i2c pins, eg: 21 and 22 for bus-0, and 5 and 4 for bus-1");
+    }
   }
   if (query==NULL || strcmp(query, "identify") == 0) {
     consolewriteln ((const char*) "identify <pin> [invert]");
     consolewriteln ((const char*) "identify [on|off|flash|fflash|sflash] [persist]");
-    consolewriteln ((const char*) "    Configure ID LED pin, on, off or flash with fast and slow options");
-    consolewriteln ((const char*) "    Define state. Without \"persist\" state is cleared on restart");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure ID LED pin, on, off or flash with fast and slow options");
+      consolewriteln ((const char*) "    Define state. Without \"persist\" state is cleared on restart");
+    }
   }
   if (query==NULL || strcmp(query, "interval") == 0) {
     consolewriteln ((const char*) "interval [<devicetype> <seconds>]");
-    consolewriteln ((const char*) "    Define time interval between each measurement(1-300 seconds)");
+    if (fullList) {
+      consolewriteln ((const char*) "    Define time interval between each measurement(1-300 seconds)");
+    }
   }
   if (query==NULL || strcmp(query, "inventory") == 0) {
     consolewriteln ((const char*) "inventory");
-    consolewriteln ((const char*) "    Show inventory of connected/configured devices");
+    if (fullList) {
+      consolewriteln ((const char*) "    Show inventory of connected/configured devices");
+    }
   }
   if (query==NULL || strcmp(query, "list") == 0 || strcmp(query, "show") == 0) {
     consolewriteln ((const char*) "list|show [devices|tz|vars]");
-    consolewriteln ((const char*) "    List supported device types, timezone names or sensor variables");
+    if (fullList) {
+      consolewriteln ((const char*) "    List supported device types, timezone names or sensor variables");
+    }
   }
   if (query==NULL || strcmp(query, "ntp") == 0) {
     consolewriteln ((const char*) "ntp [<server-name>|none]");
-    consolewriteln ((const char*) "    Set network time protocol (NTP) server to source time signal");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set network time protocol (NTP) server to source time signal");
+    }
   }
   if (query==NULL || strcmp(query, "onewire") == 0) {
     consolewriteln ((const char*) "onewire <bus-number> [disable|<pin>]");
-    consolewriteln ((const char*) "    Configure Dallas OneWire devices");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure Dallas OneWire devices");
+    }
   }
   if (query==NULL || strcmp(query, "opacity") == 0) {
     consolewriteln ((const char*) "opacity [bh1750 <number> <factor>]");
-    consolewriteln ((const char*) "    Set the opacity of light sensor cover, uncovered sensor is typically 1.2");
-    consolewriteln ((const char*) "    Permissable factor range is 0.5 - 1.5");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set the opacity of light sensor cover, uncovered sensor is typically 1.2");
+      consolewriteln ((const char*) "    Permissable factor range is 0.5 - 1.5");
+    }
   }
   if (query==NULL || strcmp(query, "ota") == 0) {
     consolewriteln ((const char*) "ota [update|revert|<url>]");
-    consolewriteln ((const char*) "    Check and apply over the air update");
-    consolewriteln ((const char*) "    Revert to previous installation.");
-    consolewriteln ((const char*) "    Set base URL for OTA metadata and image");
+    if (fullList) {
+      consolewriteln ((const char*) "    Check and apply over the air update");
+      consolewriteln ((const char*) "    Revert to previous installation.");
+      consolewriteln ((const char*) "    Set base URL for OTA metadata and image");
+    }
   }
   if (query==NULL || strcmp(query, "output") == 0) {
     consolewriteln ((const char*) "output [<index> disable]");
     consolewriteln ((const char*) "output [<index> default <value>]");
     consolewriteln ((const char*) "output [<index> <pin> <relay|pwm|servo|var> <name> <rpn expression>]");
-    consolewriteln ((const char*) "    Configure output pins");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure output pins");
+    }
+  }
+  if (query==NULL || strcmp(query, "outputwait") == 0) {
+    consolewriteln ((const char*) "outputwait [<seconds>]");
+    if (fullList) {
+      consolewriteln ((const char*) "    After restarting leave outputs at default vaule for this number of seconds.");
+      consolewriteln ((const char*) "    Then start calculating output status based on RPN result value.");
+    }
   }
   if (query==NULL || strcmp(query, "password") == 0) {
     consolewriteln ((const char*) "password [<password>|none]");
+    if (fullList) {
 #ifdef USE_BLUETOOTH
-    consolewriteln ((const char*) "    Set password for Bluetooth-Serial/Telnet connections");
+      consolewriteln ((const char*) "    Set password for Bluetooth-Serial/Telnet connections");
 #else
-    consolewriteln ((const char*) "    Set password for Telnet connections");
+      consolewriteln ((const char*) "    Set password for Telnet connections");
 #endif
+    }
   }
   if (query==NULL || strcmp(query, "qnh") == 0) {
     consolewriteln ((const char*) "qnh");
-    consolewriteln ((const char*) "    set altitude based on normalised pressure (QNH)");
+    if (fullList) {
+      consolewriteln ((const char*) "    set altitude based on normalised pressure (QNH)");
+    }
   }
   if (query==NULL || strcmp(query, "quit") == 0) {
     consolewriteln ((const char*) "quit [number]");
-    consolewriteln ((const char*) "    Quit from telnet session, or cause a specific telnet ID to quit");
+    if (fullList) {
+      consolewriteln ((const char*) "    Quit from telnet session, or cause a specific telnet ID to quit");
+    }
   }
   if (query==NULL || strcmp(query, "read") == 0) {
     consolewriteln ((const char*) "read <filename>");
-    consolewriteln ((const char*) "    Read the contents of the file");
+    if (fullList) {
+      consolewriteln ((const char*) "    Read the contents of the file");
+    }
   }
   if (query==NULL || strcmp(query, "repeat") == 0) {
     consolewriteln ((const char*) "repeat [count [interval]]");
-    consolewriteln ((const char*) "    Repeat the previous command count times at interval seconds");
-    consolewriteln ((const char*) "    Default count and interval are 1 if not specified");
+    if (fullList) {
+      consolewriteln ((const char*) "    Repeat the previous command count times at interval seconds");
+      consolewriteln ((const char*) "    Default count and interval are 1 if not specified");
+    }
   }
   if (query==NULL || strcmp(query, "resistor") == 0) {
     consolewriteln ((const char*) "resistor [ina2xx <index> <milliohm>]");
-    consolewriteln ((const char*) "    Set resistance of shunt resistor for voltage measurement");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set resistance of shunt resistor for voltage measurement");
+    }
   }
   if (query==NULL || strcmp(query, "restart") == 0) {
     consolewriteln ((const char*) "restart");
-    consolewriteln ((const char*) "    Restart system, this is required if configuration changes have been made");
+    if (fullList) {
+      consolewriteln ((const char*) "    Restart system, this is required if configuration changes have been made");
+    }
   }
   if (query==NULL || strcmp(query, "rpn") == 0) {
     consolewriteln ((const char*) "rpn <expression>");
-    consolewriteln ((const char*) "    Evalute rpn expression and show stack evaluation");
+    if (fullList) {
+      consolewriteln ((const char*) "    Evalute rpn expression and show stack evaluation");
+    }
   }
   if (query==NULL || strcmp(query, "serial") == 0) {
     consolewriteln ((const char*) "serial [0|1] <rx-pin> <tx-pin> <speed> <bits>");
     consolewriteln ((const char*) "serial [0|1] [disable|pms5003|zh03b|mh-z19c|winsen|ascii|nmea]");
-    consolewriteln ((const char*) "    Set up serial port's I/O pins, speed and device type configuration");
-    consolewriteln ((const char*) "    Winsen devices include: ze27-03, zp07/08-ch20, zc05/zp14-ch4, ze15/ze16b-co, zph01/02-pm2.5");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set up serial port's I/O pins, speed and device type configuration");
+      consolewriteln ((const char*) "    Winsen devices include: ze27-03, zp07/08-ch20, zc05/zp14-ch4, ze15/ze16b-co, zph01/02-pm2.5");
+    }
   }
   if (query==NULL || strcmp(query, "scan") == 0) {
     consolewriteln ((const char*) "scan");
-    consolewriteln ((const char*) "    Scan device busses for attached devices");
+    if (fullList) {
+      consolewriteln ((const char*) "    Scan device busses for attached devices");
+    }
+  }
+  if (query==NULL || strcmp(query, "switch") == 0) {
+    consolewriteln ((const char*) "switch [<index> [<pin>|disable]]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Assign a switch to an I/O pin, or disable a switch");
+    }
   }
   if (query==NULL || strcmp(query, "terminate") == 0) {
     consolewriteln ((const char*) "terminate [now|<minutes>]");
-    consolewriteln ((const char*) "    Terminate command mode after n minutes from start, or now");
-    consolewriteln ((const char*) "    0 means do not terminate, otherwise must be between 1 and 60 minutes");
+    if (fullList) {
+      consolewriteln ((const char*) "    Terminate command mode after n minutes from start, or now");
+      consolewriteln ((const char*) "    0 means do not terminate, otherwise must be between 1 and 60 minutes");
+    }
   }
   if (query==NULL || strcmp(query, "timezone") == 0) {
     consolewriteln ((const char*) "timezone [defn]");
-    consolewriteln ((const char*) "    Set timezone, may be set using full TZ string or short cut");
-    consolewriteln ((const char*) "      use \"list tz\" for short-cuts, or enter time specification, eg");
-    consolewriteln ((const char*) "      UTC-03:00  for East African Time");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set timezone, may be set using full TZ string or short cut");
+      consolewriteln ((const char*) "      use \"list tz\" for short-cuts, or enter time specification, eg");
+      consolewriteln ((const char*) "      UTC-03:00  for East African Time");
+    }
   }
   if (query==NULL || strcmp(query, "wifi") == 0 || strcmp(query, "wifi*") == 0) {
     consolewriteln ((const char*) "wifi [<number> <ssid> [<password>]]");
-    consolewriteln ((const char*) "    configure wifi 0-3 with ssid and optional password");
+    if (fullList) {
+      consolewriteln ((const char*) "    configure wifi 0-3 with ssid and optional password");
+    }
   }
   if (query==NULL || strcmp(query, "wifimode") == 0 || strcmp(query, "wifi*") == 0) {
     consolewriteln ((const char*) "wifimode [alwayson|ondemand]");
-    consolewriteln ((const char*) "    set wifi to be \"always on\" or on connect \"on demand\"");
+    if (fullList) {
+      consolewriteln ((const char*) "    set wifi to be \"always on\" or on connect \"on demand\"");
+    }
   }
   if (query==NULL || strcmp(query, "wifiscan") == 0 || strcmp(query, "wifi*") == 0) {
     consolewriteln ((const char*) "wifiscan [enable|disable]");
-    consolewriteln ((const char*) "    set wifi to scan for non-hidden ssids and use strongest signal");
-    consolewriteln ((const char*) "    NB: the network used must be predefined by \"wifi\", or it will be ignored");
+    if (fullList) {
+      consolewriteln ((const char*) "    set wifi to scan for non-hidden ssids and use strongest signal");
+      consolewriteln ((const char*) "    NB: the network used must be predefined by \"wifi\", or it will be ignored");
+    }
   }
   if (query==NULL || strcmp(query, "write") == 0) {
     consolewriteln ((const char*) "write <filename>");
-    consolewriteln ((const char*) "    Write the contents of the file");
+    if (fullList) {
+      consolewriteln ((const char*) "    Write the contents of the file");
+    }
   }
   if (query==NULL || strcmp(query, "xysecret") == 0) {
     consolewriteln ((const char*) "xysecret [<string>|none]");
-    consolewriteln ((const char*) "    Define a \"xysecret\" field to send when using http/s to xymon server.");
+    if (fullList) {
+      consolewriteln ((const char*) "    Define a \"xysecret\" field to send when using http/s to xymon server.");
+    }
   }
   if (query==NULL || strcmp(query, "xyserver") == 0) {
     consolewriteln ((const char*) "xyserver [<DNS-name>|<IP-Address>|<URL>|none [port-number]]");
-    consolewriteln ((const char*) "    Define the xymon server and port. Port 1984 used if not explicitly defined");
-    consolewriteln ((const char*) "    If using a URL, the port number is ignored.");
+    if (fullList) {
+      consolewriteln ((const char*) "    Define the xymon server and port. Port 1984 used if not explicitly defined");
+      consolewriteln ((const char*) "    If using a URL, the port number is ignored.");
+    }
   }
 }

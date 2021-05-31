@@ -58,11 +58,17 @@ SOFTWARE.
 
       myDevTypeID = util_get_dev_type("adc");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct adc_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust adc poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         // loop forever collecting data
         while (true) {
@@ -229,12 +235,12 @@ SOFTWARE.
           struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
           if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = innerloop+1;
         }
-        retVal = testVal;
+        if (testVal>retVal) retVal = testVal;
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
           myData[devNr].state = testVal;
           xSemaphoreGive(devTypeSem[myDevTypeID]);
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

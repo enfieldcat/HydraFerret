@@ -8,8 +8,6 @@ Warning and Critical thresholds can be set for when readings are outside preset 
 
 More documentation can be found at <a href="https://conferre.cf">https://conferre.cf</a>
 
-The Arduino IDE environment is used to compile the code.
-
 User interface
 ==============
 The xymon web interface is used as the user interface.
@@ -25,10 +23,11 @@ The configuration of the unit is via a command line interface over a serial port
 Telnet access is also supported once WiFi has been configured.
 This allows pins to be assigned to the collection of data, where this may include:
 * up to 8 Counters: eg from magnetic hall effect flow sensors or light beam pedestrian counters.
+* up to 10 polled switch inputs, 0 => "off" for every poll per 5 min period, 1 => "on" for every poll per 5 min period, otherwise shows fraction of "on" per 5 minute period.
 * up to 8 ADC (Analog to digital) sensors, such as soil moisture sensors.
-* up to 2 I2C busses supporting various devices such as temperature and light sensors. On booting these busses are scanned for devices which minimises set up and allowing for a degree of "plug and play".
+* up to 2 I2C busses supporting various devices such as temperature and light sensors. On booting these busses are scanned for devices which minimises set up and allowing for a degree of "plug and play" for zero or more of supported devices.
 * up to 4 Onewire busses supporting temperature sensors.
-* up to 8 Outputs to trigger relays or perform internal actions such as reboots or firmware updates.
+* up to 10 Outputs to trigger relays or perform internal actions such as reboots or firmware updates. These may also be used just as variables to track things or as derived values.
 
 Alerting and output control is done using a rpn calculator which has access to many variables related to sensors and time.
 Each sensor (even ones of the same type) can be set to have different alerting thresholds.

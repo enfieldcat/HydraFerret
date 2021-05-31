@@ -37,6 +37,7 @@ class intcounter {
 
       myDevTypeID = util_get_dev_type ("counter");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct int_counter_s*) (devData[myDevTypeID]);
         queueData = myDevTypeID;
         while (true) {

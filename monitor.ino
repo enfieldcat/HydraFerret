@@ -55,9 +55,18 @@ void monitorCycle (void *pvParameters)
   int loop_count = 0;
   int reportDev;
 
+  if (ansiTerm) displayAnsi (4);
   consolewriteln ("Scanning for supported devices...");
+  if (ansiTerm) displayAnsi (0);
   util_start_devices();
-  delay (750);
+  if (ansiTerm) displayAnsi (4);
+  consolewriteln ("Scanning for supported devices complete");
+  consolewriteln ("Pause before starting monitoring cycle");
+  if (ansiTerm) displayAnsi (0);
+  delay (2500);
+  if (ansiTerm) displayAnsi (4);
+  consolewriteln ("5 minute monitoring cycle starts");
+  if (ansiTerm) displayAnsi (1);
   /*
    * set up timers and queues
    */
@@ -114,6 +123,10 @@ void monitorCycle (void *pvParameters)
                   the_serial.getXymonStatus(xydata);
                   sendPacket(xydata);  
                 }
+                else if (strcmp (devType[reportDev], "switch") == 0) {
+                  the_switch.getXymonStatus(xydata);
+                  sendPacket(xydata);  
+                }
               }
             }
             // Where multiple sensor type can produce the same metric...
@@ -124,6 +137,7 @@ void monitorCycle (void *pvParameters)
               if (metricCount[metric] > 0) {
                 // Find greatest alert level for the metric
                 statusIndex = 0;
+                tStatusIndex = 0;
                 for (reportDev=0; reportDev<numberOfTypes; reportDev++) {
                   if (devTypeCount[reportDev] > 0) {
                     if (metric == UV                                               && strcmp (devType[reportDev], "veml6075") == 0) {
@@ -147,7 +161,6 @@ void monitorCycle (void *pvParameters)
                     else if ((metric == TEMP)                                      && strcmp (devType[reportDev], "ds1820") == 0) {
                       tStatusIndex = the_wire.getStatusColor();
                     }
-                    else tStatusIndex = 0;
                     if (tStatusIndex > statusIndex) statusIndex = tStatusIndex;
                   }
                 }
@@ -198,6 +211,7 @@ void monitorCycle (void *pvParameters)
                 else if (strcmp (devType[reportDev], "bh1750")   == 0) the_bh1750.getXymonStats(xydata);
                 else if (strcmp (devType[reportDev], "ina2xx")   == 0) the_ina2xx.getXymonStats(xydata);
                 else if (strcmp (devType[reportDev], "serial")   == 0) the_serial.getXymonStats(xydata);
+                else if (strcmp (devType[reportDev], "switch")   == 0) the_switch.getXymonStats(xydata);
                 else if (strcmp (devType[reportDev], "adc")      == 0) the_adc.getXymonStats(xydata);
                 else if (showOutput && strcmp (devType[reportDev], "output") == 0) the_output.getXymonStats(xydata);
               }
@@ -269,7 +283,7 @@ void buildMemoryPacket(char* xydata)
   if (percFree < 100) strcat (xydata, "&green ");
   else if (percFree < 200) strcat (xydata, "&yellow");
   else strcat (xydata, "&red ");
-  sprintf (msgBuffer, "%-16s %14dMHz (Crystal freq: %dMHz)\n", "CPU Frequency", percFree, getXtalFrequencyMhz());
+  sprintf (msgBuffer, "%-16s %15dMHz (Crystal freq: %dMHz)\n", "CPU Frequency", percFree, getXtalFrequencyMhz());
   strcat  (xydata, msgBuffer);
   sprintf (msgBuffer, "&clear %-16s %s-%s (%s)\n", "Version", PROJECT_NAME, VERSION, __DATE__);
   strcat  (xydata, msgBuffer);

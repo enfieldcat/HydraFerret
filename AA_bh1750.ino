@@ -46,6 +46,7 @@ class bh1750 {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("bh1750");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         // set hi selector value and scaling factors
         for (loopCount=0; loopCount<(sizeof(resolutionMode)/sizeof(uint8_t)); loopCount++){
           integrationHi[loopCount] = (integrationLo[loopCount] >> 5 ) | 0x40;
@@ -56,6 +57,11 @@ class bh1750 {
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust bh1750 light-sensor poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
           for (int device=0; device <devTypeCount[myDevTypeID]; device++) {
@@ -284,13 +290,13 @@ class bh1750 {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = innerloop+1;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

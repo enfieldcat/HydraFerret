@@ -47,11 +47,17 @@ class bme280 {
         for (char devNr=0; devNr<devTypeCount[myDevTypeID];devNr++) if (myData[devNr].isvalid) updateCount++;
       }
       if (myDevTypeID!=255 && updateCount > 0) {
+        util_deviceTimerCreate(myDevTypeID);
         // work out counts and timing intervals for this device type
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000;
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust bme280 poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         for (char devNr=0; devNr<devTypeCount[myDevTypeID];devNr++) {
           myData[devNr].bme = new Adafruit_BME280;
@@ -64,7 +70,12 @@ class bme280 {
               myData[devNr].bme->readHumidity();
               myData[devNr].bme->readPressure();
               myData[devNr].isvalid = true;
-            } else myData[devNr].isvalid = false;
+            } else {
+              myData[devNr].isvalid = false;
+              uint8_t diag = util_i2c_read (myData[devNr].bus, myData[devNr].addr, 0xd0);
+              sprintf (msgBuffer, "bus %x, device 0x%02x is invalid type 0x%02x", myData[devNr].bus, myData[devNr].addr, diag);
+              consolewriteln (msgBuffer);
+            }
             xSemaphoreGive(wiresemaphore[myData[devNr].bus]);
           }
         }
@@ -275,13 +286,13 @@ class bme280 {
           for (uint8_t innerloop=tStart ; innerloop<tEnd; innerloop++) {
             if (myData[devNr].alert[innerloop] != NULL && rpn_calc(myData[devNr].alert[innerloop]->count, myData[devNr].alert[innerloop]->term)>0) testVal = (innerloop-tStart)+1;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state[idx] = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

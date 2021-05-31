@@ -42,6 +42,7 @@ class zebSerial {
 
       myDevTypeID = util_get_dev_type("serial");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct zebSerial_s*) (devData[myDevTypeID]);
         for (uint8_t devNr=0; devNr<2; devNr++) {
           if      ((!myData[devNr].isvalid) || strcmp (myData[devNr].devType, "disable") == 0) deviceToken[devNr] = 255;
@@ -706,13 +707,13 @@ class zebSerial {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = innerloop+1;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

@@ -47,6 +47,7 @@ class ina2xx {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("ina2xx");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct ina2xx_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
@@ -91,7 +92,7 @@ class ina2xx {
             }
             writeVal[2] = 0xff;
           }
-          else { // assume ina219, stay with defaults so it can be re-dectected on reboot as it does not hold a signature field
+          else { // assume ina219, stay with defaults so it can be re-detected on reboot as it does not hold a signature field
             writeVal[1] = 0x39;
             writeVal[2] = 0x9f;
             }
@@ -100,6 +101,11 @@ class ina2xx {
         if (pollInterval<8) delay (500+(pollInterval*1000));
         else delay (8500);
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust current sense poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         // loop forever collecting data
         while (true) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
@@ -359,13 +365,13 @@ class ina2xx {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = (innerloop-tStart)+1;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state[idx] = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

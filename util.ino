@@ -118,6 +118,7 @@ void util_i2c_scan()
       for (int addr=3; addr< 0x78; addr++) {
         if (xSemaphoreTake(wiresemaphore[n], 30000) == pdTRUE) {
           I2C_bus[n].beginTransmission(addr);
+          delay(10);
           error = I2C_bus[n].endTransmission();
           xSemaphoreGive(wiresemaphore[n]);
         } else error = 170;
@@ -864,31 +865,60 @@ void util_format_spiffs()
 }
 
 /*
+ * Create timers for discovered devices
+ */
+void util_deviceTimerCreate(uint8_t n)
+{
+  static uint32_t default_interval;
+  char msgBuffer[SENSOR_NAME_LEN];
+  
+  if (n==0) default_interval = 300000;  // counter should only read for the full period
+  else {
+    sprintf (msgBuffer, "defaultPoll_%d", n);
+    default_interval = nvs_get_int (msgBuffer, default_interval) * 1000;
+  }
+  xTimerStart (devTypeTimer[n], pdMS_TO_TICKS(default_interval));
+}
+
+
+static void util_generalTimerHandler (TimerHandle_t xTimer)
+{
+uint8_t *tchar;
+
+tchar = ((uint8_t*) pvTimerGetTimerID(xTimer));
+// xQueueSend (QHandle, Items_to_send, ticks_to_wait)
+xQueueSend (devTypeQueue[tchar[0]], tchar, 0);
+}
+
+
+/*
  * Start devices with delays betwen each start
  */
 void util_start_devices()
 {
   the_sdd1306.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_wire.begin();
-  delay (450);
+  delay (INIT_DELAY);
   theCounter.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_serial.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_adc.begin();
-  delay (450);
+  delay (INIT_DELAY);
+  the_switch.begin();
+  delay (INIT_DELAY);
   the_bme280.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_hdc1080.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_veml6075.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_bh1750.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_css811.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_ina2xx.begin();
-  delay (450);
+  delay (INIT_DELAY);
   the_output.begin();
 }

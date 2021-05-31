@@ -47,8 +47,8 @@ SOFTWARE.
 /*
  * Global variables
  */
-const  char devType[][DEVTYPESIZE] = {"counter", "adc", "bh1750", "bme280", "css811", "ds1820", "hdc1080", "ina2xx", "veml6075", "output", "serial", "sdd1306"};
-const  char devTypeID[sizeof(devType)/DEVTYPESIZE] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };   // Used for timer IDs, we want const pointers to these
+const  char devType[][DEVTYPESIZE] = {"counter", "adc", "bh1750", "bme280", "css811", "ds1820", "hdc1080", "ina2xx", "veml6075", "output", "serial", "switch", "sdd1306"};
+const  char devTypeID[sizeof(devType)/DEVTYPESIZE] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };   // Used for timer IDs, we want const pointers to these
 const int numberOfTypes = sizeof(devType)/DEVTYPESIZE;
 static TwoWire I2C_bus[2] = {TwoWire(0), TwoWire(1)};
 static OneWire *one_bus[MAX_ONEWIRE];
@@ -196,22 +196,18 @@ void setup() {
   else spiffsAvailable = true;
   OTAcertExists(SPIFFS);
   /*
-   * Create full set of device handler semaphores, timers and queues
+   * Create full set of device handler semaphores, timers and queues - leave timers in a stopped state
    */
   for (uint8_t n=0; n<MAX_OUTPUT; n++) outputCtrl[n].outputPin = 99;
-  for (uint8_t n=0; n<(sizeof(metricCount)/sizeof(int)); n++) metricCount[n] = 0;
+  for (uint8_t n=0; n<(sizeof(metricCount)/sizeof(int)); n++) metricCount[n] = 0;  
   for (uint8_t n=0; n<numberOfTypes; n++) {
-    if (n==0) default_interval = 300;  // counter should only read for the full period
-    else default_interval = 60;        // default period is once per minute
-    sprintf (msgBuffer, "defaultPoll_%d", n);
-    default_interval = nvs_get_int (msgBuffer, default_interval) * 1000;
     devTypeCount[n]= 0;
     devTypeSem[n]   = xSemaphoreCreateMutex();
-    devTypeQueue[n] = xQueueCreate (1, sizeof(uint8_t));
-    devTypeTimer[n] = xTimerCreate (devType[n], pdMS_TO_TICKS(default_interval), pdTRUE, (void*) &devTypeID[n], generalTimerHandler);
     devData[n] = NULL;
-    xTimerStart (devTypeTimer[n], pdMS_TO_TICKS(default_interval));
+    devTypeQueue[n] = xQueueCreate (1, sizeof(uint8_t));
     xQueueSend (devTypeQueue[n], &devTypeID[n], 0);
+    devTypeTimer[n] = xTimerCreate ((char*) devType[n], pdMS_TO_TICKS(1000), pdTRUE, (void*) &devTypeID[n], generalTimerHandler);
+    xTimerStop(devTypeTimer[n], 1000);
   }
   /*
    * Initialise I2C busses
