@@ -32,6 +32,7 @@ class ctrloutput {
 
     static void  updateloop(void *pvParameters)
     {
+      uint16_t waitSecs;
       uint8_t myDevTypeID = 255;
       uint8_t queueData;
       uint8_t index;
@@ -41,12 +42,14 @@ class ctrloutput {
       float tFloat;
       
       myDevTypeID = util_get_dev_type("output");
+      waitSecs = nvs_get_int ("outputWaitSec", 300);
       sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
       pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
-      wait_count = (300 / pollInterval) + 1;  // wait 5 minutes for valid readings to appear
+      wait_count = (waitSecs / pollInterval) + 1;  // wait 5 minutes for valid readings to appear
       pollInterval = pollInterval * 1000; // now use poll interval in ms
       queueData = myDevTypeID;
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         for (index=0; index<MAX_OUTPUT; index++) {
           outputCtrl[index].initialised = 0;
         }

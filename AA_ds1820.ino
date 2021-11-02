@@ -96,11 +96,17 @@ class oneWireTemperature {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("ds1820");
       if (myDevTypeID!=255) {
+        // util_deviceTimerCreate(myDevTypeID);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
-        queueData = myDevTypeID;
+         if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust ds1820 temperature poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
+       queueData = myDevTypeID;
         myData = (struct dallasTemp_s*) devData[myDevTypeID];
 
         // loop forever collecting data
@@ -302,6 +308,7 @@ class oneWireTemperature {
         myDevTypeID = util_get_dev_type((char*) myDevType);
         devTypeCount[myDevTypeID] = 0;
         needsInitialisation = false;
+        util_deviceTimerCreate(myDevTypeID);
         devValid = 0;
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(5000)) == pdTRUE) {
           // Initialise busses
@@ -417,24 +424,26 @@ class oneWireTemperature {
       //
       // Now present findings, expect this data to be constant, so exclusive semaphore not required.
       //
-      if (devTypeCount[myDevTypeID] > 0) consolewriteln ("OneWire temperature sensors:");
-      else consolewriteln ("No OneWire sensors found");
-      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
-        sprintf (msgBuffer, " * ID: %02d, UID ", myData[n].index);
-        consolewrite (msgBuffer);
-        for (uint8_t k=0; k<8; k++) {
-          sprintf (msgBuffer, "%02x", myData[n].address[k]);
+      if (devTypeCount[myDevTypeID] > 0) {
+        consolewriteln ("OneWire temperature sensors:");
+        // else consolewriteln ("No OneWire sensors found");
+        for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+          sprintf (msgBuffer, " * ID: %02d, UID ", myData[n].index);
           consolewrite (msgBuffer);
-        }
-        sprintf (msgBuffer, ", Name: %s, Type: ", myData[n].uniquename);
-        consolewrite (msgBuffer);
-        switch (myData[n].address[0]) {
-          case DS18S20MODEL:  consolewriteln ("DS18S20/DS1820"); break;
-          case DS18B20MODEL:  consolewriteln ("DS18B20/MAX31820"); break;
-          case DS1822MODEL:   consolewriteln ("DS1822"); break;
-          case DS1825MODEL:   consolewriteln ("DS1825"); break;
-          case DS28EA00MODEL: consolewriteln ("DS28EA00"); break;
-          default:            consolewriteln ("unknown (invalid)"); break;
+          for (uint8_t k=0; k<8; k++) {
+            sprintf (msgBuffer, "%02x", myData[n].address[k]);
+            consolewrite (msgBuffer);
+          }
+          sprintf (msgBuffer, ", Name: %s, Type: ", myData[n].uniquename);
+          consolewrite (msgBuffer);
+          switch (myData[n].address[0]) {
+            case DS18S20MODEL:  consolewriteln ("DS18S20/DS1820"); break;
+            case DS18B20MODEL:  consolewriteln ("DS18B20/MAX31820"); break;
+            case DS1822MODEL:   consolewriteln ("DS1822"); break;
+            case DS1825MODEL:   consolewriteln ("DS1825"); break;
+            case DS28EA00MODEL: consolewriteln ("DS28EA00"); break;
+            default:            consolewriteln ("unknown (invalid)"); break;
+          }
         }
       }
     }
@@ -541,13 +550,13 @@ class oneWireTemperature {
           for (uint8_t innerloop=0 ; innerloop<3; innerloop++) {
             if (myData[devNr].alert[innerloop] != NULL && rpn_calc(myData[devNr].alert[innerloop]->count, myData[devNr].alert[innerloop]->term)>0) testVal = innerloop+1;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }

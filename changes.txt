@@ -1,0 +1,11 @@
+Version 21.10rc1
+================
+* Timing bug fix: Only run timers which are required, ensure counter timer period is full 300 seconds long.
+* Add support for switch sensor
+* Address wifimode ondemand memory leak
+* Use highest alert level for page if there are multiple devices of same type but different warning levels
+* Adjust help command to support a summary parameter
+
+Version 2104
+============
+* Original release.

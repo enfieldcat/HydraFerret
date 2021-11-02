@@ -30,6 +30,7 @@ class css811 {
 
     static void  updateloop(void *pvParameters)
     {
+      float xfrmResult;
       uint8_t myDevTypeID = 255;
       uint8_t queueData;
       uint8_t statusVal;
@@ -38,6 +39,7 @@ class css811 {
       uint8_t measurementMode = 0x00;
       uint8_t errorcount = 0;
       uint16_t input_co2, input_tvoc;
+      uint16_t modeSetCount = 300;
       struct css811_s *myData;
       char msgBuffer[16];
       int pollInterval;
@@ -46,7 +48,9 @@ class css811 {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("css811");
       if (myDevTypeID!=255) {
+        devRestartable[myDevTypeID] = false;
         // set up polling intervals
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct css811_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
@@ -55,6 +59,11 @@ class css811 {
         else measurementMode = 0x30;                        // once a minute
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust css811 CO2 poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         // clear counters and reset sensor
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
@@ -68,6 +77,7 @@ class css811 {
             myData[device].tvoc_average = 0.0;
             myData[device].co2_last     = 0.0;
             myData[device].tvoc_last    = 0.0;
+            myData[device].transform    = 0.0;
             myData[device].lastMode     = 99;
             resetCss811 (myData[device].bus, myData[device].addr);
           }
@@ -80,7 +90,7 @@ class css811 {
         }
         delay (1000);  // delay before attempting to read any data
         consolewriteln ("Starting css811 measurement");
-        while (true) {
+        while (devTypeCount[myDevTypeID]>0) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
             if (ansiTerm) displayAnsi(3);
             consolewriteln ("Missing css811 signal");
@@ -146,12 +156,26 @@ class css811 {
                 myData[device].tvoc_accum   = 0.0;
                 xSemaphoreGive(devTypeSem[myDevTypeID]);
               }
-              setCss811Mode (myDevTypeID, measurementMode);
+              struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+              if (xfrm_Ptr != NULL) {
+                xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
+                  myData[device].transform = xfrmResult;
+                  xSemaphoreGive(devTypeSem[myDevTypeID]);
+                }
+              }
+              if (++modeSetCount >= 24) { // keep set every 2 hours
+                modeSetCount = 0;
+                setCss811Mode (myDevTypeID, measurementMode);
+              }
               compensate (myData, device);
             }
             loopCount = 0;
           }
         }
+      }
+      if (myDevTypeID!=255) {
+        util_deallocate (myDevTypeID);
       }
       vTaskDelete( NULL );
     }
@@ -368,7 +392,7 @@ class css811 {
         }
       }
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) "No css811 sensors found.");
+        // consolewriteln ((const char*) "No css811 sensors found.");
         return(false);  // nothing found!
       }
       // set up and inittialise structures
@@ -377,10 +401,10 @@ class css811 {
       devNr = 0;
       for (uint8_t bus=0; bus<2 && devNr<devTypeCount[myDevTypeID]; bus++) if (I2C_enabled[bus]) {
         for (uint8_t device=0; device < (sizeof(dev_addr)/sizeof(char)) && devNr<devTypeCount[myDevTypeID]; device++) {
+          myData[devNr].bus = bus;
+          myData[devNr].addr = dev_addr[device];
+          myData[devNr].isvalid = false;
           if (util_i2c_probe(bus, dev_addr[device])) {
-            myData[devNr].bus = bus;
-            myData[devNr].addr = dev_addr[device];
-            myData[devNr].isvalid = false;
             devHWID = util_i2c_read (bus, dev_addr[device], 0x20);
             if (devHWID == 0x81) {
               for (uint8_t innerLoop=0; innerLoop<2; innerLoop++) myData[devNr].state[innerLoop] = GREEN;
@@ -417,6 +441,13 @@ class css811 {
                 }
               }
               //
+              // get rpn transform
+              //
+              sprintf (msgBuffer, "css811Xfm_%d", devNr);  // Transformation Logic
+              util_getLogic (msgBuffer, &myData[devNr].xfrmLogic);
+              sprintf (msgBuffer, "css811Alt_%d", devNr);  // Transformation Name
+              nvs_get_string (msgBuffer, myData[devNr].xfrmName, "transform", sizeof (myData[devNr].xfrmName));
+              //
               // Process rules
               //
               retval = true;
@@ -448,6 +479,10 @@ class css811 {
           }
         }
       }
+      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+        if (myData[n].bus > 1) myData[n].isvalid = false;
+        if (myData[n].addr != dev_addr[0] && myData[n].addr != dev_addr[1]) myData[n].isvalid = false;
+      }
       if (retval) xTaskCreate(updateloop, devType[myDevTypeID], 4096, NULL, 12, NULL);
       // inventory();
       return (retval);
@@ -459,11 +494,11 @@ class css811 {
       char devStatus[9];
       struct css811_s *myData;
 
-      consolewriteln ((const char*) "Test: css811 - CO2 and TVOC");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No css811 sensors found.");
+        // consolewriteln ((const char*) " * No css811 sensors found.");
         return;
       }
+      consolewriteln ((const char*) "Test: css811 - CO2 and TVOC");
       myData = (struct css811_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         if (myData[device].isvalid) {
@@ -499,13 +534,13 @@ class css811 {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = (innerloop-tStart)+YELLOW;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state[idx] = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }
@@ -534,9 +569,13 @@ class css811 {
             }
             uint8_t currentState = myData[device].state[indx];
             util_getLogicTextXymon (myData[device].alert[(currentState-YELLOW)+(3*indx)], xydata, currentState, myData[device].uniquename);
-            sprintf (msgBuffer, " &%s %-16s %8s%-6s (", xymonColour[currentState], myData[device].uniquename, util_ftos (theValue, 2), uom[indx]);
+            sprintf (msgBuffer, " &%s %-16s %8s%-6s ", xymonColour[currentState], myData[device].uniquename, util_ftos (theValue, 2), uom[indx]);
             strcat  (xydata, msgBuffer);
-            sprintf (msgBuffer, "average over %d readings)\n", myData[device].averagedOver);
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, " %8s %s  ", util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              strcat  (xydata, msgBuffer);
+            }
+            sprintf (msgBuffer, "(average over %d readings)\n", myData[device].averagedOver);
             strcat  (xydata, msgBuffer);
           }
           else {
@@ -579,6 +618,13 @@ class css811 {
             strcat  (xydata, "DS:tvoc:GAUGE:600:U:U ");
             strcat  (xydata, util_ftos (myData[device].tvoc_average, 2));
             strcat  (xydata, "\n");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[device].xfrmName, myData[device].uniquename);
+              strcat  (xydata, msgBuffer);
+              strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+              strcat  (xydata, util_ftos (myData[device].transform, 2));
+              strcat  (xydata, "\n");
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -589,7 +635,7 @@ class css811 {
     void printData()
     {
       struct css811_s *myData;
-      char msgBuffer[40];
+      char msgBuffer[64];
       char stateType[2][5] = {"csta", "tsta"};
       
       sprintf (msgBuffer, "css811.dev %d", devTypeCount[myDevTypeID]);
@@ -621,6 +667,10 @@ class css811 {
             consolewrite (msgBuffer);
             consolewrite (util_ftos (myData[device].tvoc_last, 1));
             consolewriteln (" ppb");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "css811.%d.xfrm (%s) %s (%s)", device, myData[device].uniquename, util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              consolewriteln (msgBuffer);
+            }
             for (uint8_t staLoop=0 ;staLoop<2; staLoop++) {
               sprintf (msgBuffer, "css811.%d.%s (%s) ", device, stateType[staLoop], myData[device].uniquename);
               consolewrite (msgBuffer);
@@ -652,6 +702,7 @@ class css811 {
           else if (strcmp(parameter,"tvoc") == 0) retval = myData[devNr].tvoc_average;
           else if (strcmp(parameter,"last") == 0) retval = myData[devNr].tvoc_last;
           else if (strcmp(parameter,"tsta") == 0) retval = myData[devNr].state[1];
+          else if (strcmp(parameter,"xfrm") == 0) retval = myData[devNr].transform;
           else retval = 0.00;
         }
         else retval=0.00;

@@ -34,11 +34,16 @@ class intcounter {
       uint8_t myDevTypeID = 255;
       uint8_t queueData;
       struct int_counter_s *myData;
+      float xfrmResult;
 
       myDevTypeID = util_get_dev_type ("counter");
       if (myDevTypeID!=255) {
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct int_counter_s*) (devData[myDevTypeID]);
         queueData = myDevTypeID;
+        for (int n=0; n<devTypeCount[myDevTypeID]; n++) {
+          myData[n].transform = 0.0;
+        }
         while (true) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(310000)) != pdPASS) {
             if (ansiTerm) displayAnsi(3);
@@ -55,6 +60,16 @@ class intcounter {
               }
             }
             xSemaphoreGive(devTypeSem[myDevTypeID]);
+            for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
+              struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+              if (xfrm_Ptr != NULL) {
+                xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(1000)) == pdTRUE) {
+                  myData[device].transform = xfrmResult;
+                  xSemaphoreGive(devTypeSem[myDevTypeID]);
+                }
+              }
+            }
           }
         }
       }
@@ -131,6 +146,13 @@ class intcounter {
               sprintf (msgBuffer, "Attaching pin %d as %s (%s) counter", (myData[tmpInt]).pin, (myData[tmpInt]).uniquename, (myData[tmpInt]).uom);
               consolewriteln (msgBuffer);
               init_interrupt(tmpInt, (myData[tmpInt]).pin);
+              //
+              // get rpn transform
+              //
+              sprintf (msgBuffer, "counterXfm_%d", tmpInt);  // Transformation Logic
+              util_getLogic (msgBuffer, &myData[tmpInt].xfrmLogic);
+              sprintf (msgBuffer, "counterAlt_%d", tmpInt);  // Transformation Name
+              nvs_get_string (msgBuffer, myData[tmpInt].xfrmName, "transform", sizeof (myData[tmpInt].xfrmName));
               for (uint8_t level=0; level<3 ; level++) {
                 sprintf (ruleName, "coun_%d%d", level, tmpInt);  // Warning Logic
                 nvs_get_string (ruleName, msgBuffer, "disable", sizeof(msgBuffer));
@@ -229,8 +251,13 @@ class intcounter {
             sprintf (outBuffer, "%14s ", util_dtos (tFloat, dp));
             strcat (xydata, outBuffer);
             tFloat = ((float)(myData[n].current - myData[n].previous) * myData[n].multiplier) + myData[n].offsetval;
-            sprintf (outBuffer, "%14s\n", util_dtos (tFloat, dp));
+            sprintf (outBuffer, "%14s", util_dtos (tFloat, dp));
             strcat (xydata, outBuffer);
+            if (myData[n].xfrmLogic != NULL) {
+              sprintf (outBuffer, "  %10s %s", util_ftos (myData[n].transform, 2), myData[n].xfrmName);
+              strcat  (xydata, outBuffer);
+            }
+            strcat (xydata, "\n");
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -259,6 +286,13 @@ class intcounter {
           strcat  (xydata, "DS:value:GAUGE:600:0:U ");
           strcat  (xydata, util_dtos (tFloat, dp));
           strcat  (xydata, "\n");
+          if (myData[n].xfrmLogic != NULL) {
+            sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[n].xfrmName, myData[n].uniquename);
+            strcat  (xydata, msgBuffer);
+            strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+            strcat  (xydata, util_ftos (myData[n].transform, 2));
+            strcat  (xydata, "\n");
+          }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
       }
@@ -282,20 +316,24 @@ class intcounter {
           else if (myData[device].multiplier < 1) dp = 1;
           else dp = 0;
           tFloat = ((float)(myData[device].current - myData[device].previous) * myData[device].multiplier) + myData[device].offsetval;
-          sprintf (msgBuffer, "counter[%d].diff (%s) ", device, myData[device].uniquename);
+          sprintf (msgBuffer, "counter.%d.diff (%s) ", device, myData[device].uniquename);
           consolewrite (msgBuffer);
           consolewriteln (util_ftos (tFloat, dp));
           tFloat = ((float)(myData[device].current) * myData[device].multiplier) + myData[device].offsetval;
-          sprintf (msgBuffer, "counter[%d].tota (%s) ", device, myData[device].uniquename);
+          sprintf (msgBuffer, "counter.%d.tota (%s) ", device, myData[device].uniquename);
           consolewrite (msgBuffer);
           consolewriteln (util_ftos (tFloat, dp));
           dp = 3;
-          sprintf (msgBuffer, "counter[%d].mult (%s) ", device, myData[device].uniquename);
+          sprintf (msgBuffer, "counter.%d.mult (%s) ", device, myData[device].uniquename);
           consolewrite (msgBuffer);
           consolewriteln (util_ftos (myData[device].multiplier, (dp+1)));
-          sprintf (msgBuffer, "counter[%d].off (%s) ", device, myData[device].uniquename);
+          sprintf (msgBuffer, "counter.%d.off  (%s) ", device, myData[device].uniquename);
           consolewrite (msgBuffer);
           consolewriteln (util_ftos (myData[device].offsetval, (dp+1)));
+          if (myData[device].xfrmLogic != NULL) {
+            sprintf (msgBuffer, "counter.%d.xfrm (%s) %s (%s)", device, myData[device].uniquename, util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+            consolewriteln (msgBuffer);
+          }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
       }     
@@ -314,6 +352,7 @@ class intcounter {
         else if (strcmp(parameter,"tota") == 0) retval = ((float)(myData[devNr].current) * myData[devNr].multiplier) + myData[devNr].offsetval;
         else if (strcmp(parameter,"mult") == 0) retval = myData[devNr].multiplier;
         else if (strcmp(parameter,"offs") == 0) retval = myData[devNr].offsetval;
+        else if (strcmp(parameter,"xfrm") == 0) retval = myData[devNr].transform;
         else retval=0.00;
         xSemaphoreGive(devTypeSem[myDevTypeID]);
       }

@@ -47,12 +47,13 @@ SOFTWARE.
 /*
  * Global variables
  */
-const  char devType[][DEVTYPESIZE] = {"counter", "adc", "bh1750", "bme280", "css811", "ds1820", "hdc1080", "ina2xx", "veml6075", "output", "serial", "sdd1306"};
-const  char devTypeID[sizeof(devType)/DEVTYPESIZE] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };   // Used for timer IDs, we want const pointers to these
+const  char devType[][DEVTYPESIZE] = {"counter", "adc", "bh1750", "bme280", "css811", "ds1820", "hdc1080", "ina2xx", "pfc8583", "veml6075", "output", "serial", "switch", "sdd1306"};
+const  char devTypeID[sizeof(devType)/DEVTYPESIZE] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 };   // Used for timer IDs, we want const pointers to these
 const int numberOfTypes = sizeof(devType)/DEVTYPESIZE;
 static TwoWire I2C_bus[2] = {TwoWire(0), TwoWire(1)};
 static OneWire *one_bus[MAX_ONEWIRE];
 static HardwareSerial serial_dev[2] = {HardwareSerial(1), HardwareSerial(2)};
+static bool devRestartable[sizeof(devType)/DEVTYPESIZE];
 static bool I2C_enabled[2] = { false, false };
 static SemaphoreHandle_t wiresemaphore[2] = { NULL, NULL };
 static char device_name[SENSOR_NAME_LEN];
@@ -65,6 +66,7 @@ static TimerHandle_t   devTypeTimer[sizeof(devType)/DEVTYPESIZE];
 static QueueHandle_t   devTypeQueue[sizeof(devType)/DEVTYPESIZE];
 static double unit_altitude = 0.0;
 static char ntp_server[64];
+static uint8_t debugLevel = 0;
 // Pointers to device data arrays allocated using malloc
 static void *devData[sizeof(devType)/DEVTYPESIZE];
 // Warning colours
@@ -72,7 +74,8 @@ static const char xymonColour[][7] = { "green", "yellow", "red", "purple", "blue
 // alert labels
 static const char alertLabel[][9] = {"warning", "critical", "extreme" };
 // list of metric and their count of sensors
-static const char metricName[][16] = { "temperature", "humidity", "pressure", "lux", "uv", "co2", "tvoc", "volts", "amps", "watts"};
+// enum testType {TEMP, HUMID, PRES, LUX, UV, CO2, TVOC, DIST, COUN, VOLT, AMP, WATT};
+static const char metricName[][16] = { "temperature", "humidity", "pressure", "lux", "uv", "co2", "tvoc", "distance", "count", "volts", "amps", "watts"};
 static int metricCount[WATT + 1];
 static WiFiServer telnetServer(23);
 static WiFiClient telnetServerClients[MAX_TELNET_CLIENTS];
@@ -83,6 +86,8 @@ static bool showOutput = false;
 static bool showLogic  = false;
 static bool isBigEndian= false;
 static bool spiffsAvailable = false;
+static bool ap_is_started = false;
+// static bool disable_brownout = false;
 static uint16_t networkUserCount = 0;
 // Output control
 static struct output_s outputCtrl [MAX_OUTPUT];
@@ -151,6 +156,8 @@ void setup() {
     setCpuFrequencyMhz (cpuSpeed);
   }
   xTaskCreate(idFlashCycle,  "idFlashCycle",  2048, NULL, 4, NULL);
+  for (uint8_t n=0; n<sizeof(devType)/DEVTYPESIZE; n++) devRestartable[n] = true;
+  debugLevel = nvs_get_int ("debug", 0);
   for (uint8_t n=0; n<5; n++) {
     sprintf (msgBuffer, "ansi_%s", ansiName[n]);
     nvs_get_string (msgBuffer, tBuffer, ansiString[n], sizeof(tBuffer));
@@ -164,8 +171,8 @@ void setup() {
    * Print out some info about the device
    */
   util_print_restart_cause();
-  // util_show_system_id();
-  xTaskCreate(serialConsole, "serialConsole", 6144, NULL, 4, NULL);
+  util_show_system_id();
+  xTaskCreate(serialConsole, "serialConsole", 8192, NULL, 4, NULL);
   if (ansiTerm) displayAnsi (4);
   consolewriteln ("Console Ready");
   consolewriteln ("Press enter to get prompt");
@@ -179,13 +186,12 @@ void setup() {
    *  12 - data collection tasks
    */
   consolewrite ("Start up delay before searching for devices: ");
-  if (nvs_get_int("startupDelay", 1) == 0) {
+  if (nvs_get_int("startupDelay", 1) == 1) {
     consolewriteln ("60 secs");
     delay (60000);
   }
   else {
     consolewriteln ("0 secs");
-    // delay (10000);
   }
 
   if(!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){
@@ -196,24 +202,20 @@ void setup() {
   else spiffsAvailable = true;
   OTAcertExists(SPIFFS);
   /*
-   * Create full set of device handler semaphores, timers and queues
+   * Create full set of device handler semaphores, timers and queues - leave timers in a stopped state
    */
   for (uint8_t n=0; n<MAX_OUTPUT; n++) outputCtrl[n].outputPin = 99;
-  for (uint8_t n=0; n<(sizeof(metricCount)/sizeof(int)); n++) metricCount[n] = 0;
+  for (uint8_t n=0; n<(sizeof(metricCount)/sizeof(int)); n++) metricCount[n] = 0;  
   for (uint8_t n=0; n<numberOfTypes; n++) {
-    if (n==0) default_interval = 300;  // counter should only read for the full period
-    else default_interval = 60;        // default period is once per minute
-    sprintf (msgBuffer, "defaultPoll_%d", n);
-    default_interval = nvs_get_int (msgBuffer, default_interval) * 1000;
     devTypeCount[n]= 0;
     devTypeSem[n]   = xSemaphoreCreateMutex();
-    devTypeQueue[n] = xQueueCreate (1, sizeof(uint8_t));
-    devTypeTimer[n] = xTimerCreate (devType[n], pdMS_TO_TICKS(default_interval), pdTRUE, (void*) &devTypeID[n], generalTimerHandler);
     devData[n] = NULL;
-    xTimerStart (devTypeTimer[n], pdMS_TO_TICKS(default_interval));
+    devTypeQueue[n] = xQueueCreate (1, sizeof(uint8_t));
     xQueueSend (devTypeQueue[n], &devTypeID[n], 0);
+    devTypeTimer[n] = xTimerCreate ((char*) devType[n], pdMS_TO_TICKS(1000), pdTRUE, (void*) &devTypeID[n], generalTimerHandler);
+    xTimerStop(devTypeTimer[n], 1000);
   }
-  /*
+   /*
    * Initialise I2C busses
    */
   consolewriteln ("i2c bus initialisation:");
@@ -246,6 +248,10 @@ void setup() {
   /*
    * Display wifi multi settings
    */
+  if (nvs_get_int ("wifi_ap", 1) == 1) {
+    networkUserCount++;
+    net_start_ap();
+  }
   wifimode = nvs_get_int ("wifimode", 0);
   consolewriteln ("Test WiFi connectivity");
   networkUserCount++;

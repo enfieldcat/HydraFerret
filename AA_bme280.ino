@@ -31,6 +31,7 @@ class bme280 {
     static void  updateloop(void *pvParameters)
     {
       float latestTemp, latestHumid, latestPressure;
+      float xfrmResult;
       int pollInterval;
       int updateCount, cycle_count;
       uint8_t myDevTypeID = 255;
@@ -47,11 +48,18 @@ class bme280 {
         for (char devNr=0; devNr<devTypeCount[myDevTypeID];devNr++) if (myData[devNr].isvalid) updateCount++;
       }
       if (myDevTypeID!=255 && updateCount > 0) {
+        devRestartable[myDevTypeID] = false;
+        util_deviceTimerCreate(myDevTypeID);
         // work out counts and timing intervals for this device type
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000;
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust bme280 poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         for (char devNr=0; devNr<devTypeCount[myDevTypeID];devNr++) {
           myData[devNr].bme = new Adafruit_BME280;
@@ -64,12 +72,17 @@ class bme280 {
               myData[devNr].bme->readHumidity();
               myData[devNr].bme->readPressure();
               myData[devNr].isvalid = true;
-            } else myData[devNr].isvalid = false;
+            } else {
+              myData[devNr].isvalid = false;
+              uint8_t diag = util_i2c_read (myData[devNr].bus, myData[devNr].addr, 0xd0);
+              sprintf (msgBuffer, "bus %x, device 0x%02x is invalid type 0x%02x", myData[devNr].bus, myData[devNr].addr, diag);
+              consolewriteln (msgBuffer);
+            }
             xSemaphoreGive(wiresemaphore[myData[devNr].bus]);
           }
         }
         // loop forever collecting data
-        while (true) {
+        while (devTypeCount[myDevTypeID] > 0) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
             consolewriteln ("Missing bme280 signal");
           }
@@ -120,6 +133,18 @@ class bme280 {
             }
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
+          for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
+            if (myData[device].isvalid && myData[device].readingCount == 0) {
+              struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+              if (xfrm_Ptr != NULL) {
+                xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
+                  myData[device].transform = xfrmResult;
+                  xSemaphoreGive(devTypeSem[myDevTypeID]);
+                }
+              }
+            }
+          }
         }
       }
       else {
@@ -127,9 +152,8 @@ class bme280 {
         consolewriteln ("Could not determine bme280 type ID for update loop");
         if (ansiTerm) displayAnsi(1);
         }
-      if (myDevTypeID != 255) {
-        devTypeCount[myDevTypeID] = 0;
-        if (devData[myDevTypeID] != NULL) free (devData[myDevTypeID]);
+      if (myDevTypeID!=255) {
+        util_deallocate (myDevTypeID);
       }
       vTaskDelete( NULL );
     }
@@ -164,7 +188,7 @@ class bme280 {
         }
       }
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) "No bme280 sensors found.");
+        // consolewriteln ((const char*) "No bme280 sensors found.");
         return(false);  // nothing found!
       }
       // set up and inittialise structures
@@ -196,7 +220,18 @@ class bme280 {
             myData[devNr].temp_last     = 0.0;
             myData[devNr].pres_last     = 0.0;
             myData[devNr].humid_last    = 0.0;
+            myData[devNr].transform     = 0.0;
             myData[devNr].uncompensatedPres = 0.0;
+            //
+            // get rpn transform
+            //
+            sprintf (msgBuffer, "bme280Xfm_%d", devNr);  // Transformation Logic
+            util_getLogic (msgBuffer, &myData[devNr].xfrmLogic);
+            sprintf (msgBuffer, "bme280Alt_%d", devNr);  // Transformation Name
+            nvs_get_string (msgBuffer, myData[devNr].xfrmName, "transform", sizeof (myData[devNr].xfrmName));
+            //
+            // Get warning settings
+            //
             for (uint8_t sense=0; sense<subtypeLen; sense++) {
               myData[devNr].state[sense] = GREEN;
               for (uint8_t level=0; level<3 ; level++) {
@@ -222,6 +257,10 @@ class bme280 {
           }
         }
       }
+      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+        if (myData[n].bus > 1) myData[n].isvalid = false;
+        if (myData[n].addr != dev_addr[0] && myData[n].addr != dev_addr[1]) myData[n].isvalid = false;
+      }
       if (retval) xTaskCreate(updateloop, devType[myDevTypeID], 4096, NULL, 12, NULL);
       // inventory();
       return (retval);
@@ -233,11 +272,11 @@ class bme280 {
       char devStatus[9];
       struct bme280_s *myData;
 
-      consolewriteln ((const char*) "Test: bme280 - temperature, humidity and pressure");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No bme280 sensors found.");
+        // consolewriteln ((const char*) " * No bme280 sensors found.");
         return;
       }
+      consolewriteln ((const char*) "Test: bme280 - temperature, humidity and pressure");
       myData = (struct bme280_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         if (myData[device].isvalid) {
@@ -275,13 +314,13 @@ class bme280 {
           for (uint8_t innerloop=tStart ; innerloop<tEnd; innerloop++) {
             if (myData[devNr].alert[innerloop] != NULL && rpn_calc(myData[devNr].alert[innerloop]->count, myData[devNr].alert[innerloop]->term)>0) testVal = (innerloop-tStart)+1;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state[idx] = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }
@@ -409,6 +448,13 @@ class bme280 {
               strcat  (xydata, util_ftos (myData[device].pres_average, 2));
               strcat  (xydata, "\n");
             }
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[device].xfrmName, myData[device].uniquename);
+              strcat  (xydata, msgBuffer);
+              strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+              strcat  (xydata, util_ftos (myData[device].transform, 2));
+              strcat  (xydata, "\n");
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -441,6 +487,7 @@ class bme280 {
           else if (strcmp(parameter,"lasd") == 0) retval = util_dewpoint(myData[devNr].temp_last,    myData[devNr].humid_last);
           else if (strcmp(parameter,"sos")  == 0) retval = util_speedOfSound(myData[devNr].temp_average, myData[devNr].humid_average);
           else if (strcmp(parameter,"lass") == 0) retval = util_speedOfSound(myData[devNr].temp_last,    myData[devNr].humid_last);
+          else if (strcmp(parameter,"xfrm") == 0) retval = myData[devNr].transform;
           else retval = 0.00;
         }
         else retval=0.00;
@@ -453,7 +500,7 @@ class bme280 {
     void printData()
     {
       struct bme280_s *myData;
-      char msgBuffer[40];
+      char msgBuffer[64];
       char stateType[3][5] = {"tsta", "hsta", "psta"};
       
       sprintf (msgBuffer, "bme280.dev %d", devTypeCount[myDevTypeID]);
@@ -521,7 +568,7 @@ class bme280 {
               consolewrite (util_ftos (util_speedOfSound(myData[device].temp_average, myData[device].humid_average), 1));
               consolewriteln (" m/s");
             }
-            sprintf (msgBuffer, "bme280.%d.lasp (%s) ", device, myData[device].uniquename);
+            sprintf (msgBuffer, "bme280.%d.lass (%s) ", device, myData[device].uniquename);
             consolewrite (msgBuffer);
             consolewrite (util_ftos (util_speedOfSound(myData[device].temp_last, myData[device].humid_last), 1));
             consolewriteln (" m/s");
@@ -536,6 +583,10 @@ class bme280 {
               consolewrite (" (");
               consolewrite ((char*) xymonColour[myData[device].state[staLoop]]);
               consolewriteln (")");
+            }
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "bme280.%d.xfrm (%s) %s (%s)", device, myData[device].uniquename, util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              consolewriteln (msgBuffer);
             }
           }
         }

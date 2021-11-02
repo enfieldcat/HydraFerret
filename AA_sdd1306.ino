@@ -45,11 +45,17 @@ class sdd1306 {
       for (char n=0; n<4; n++) displayBuffer[n][0] = '\0';
       myDevTypeID = util_get_dev_type("sdd1306");
       if (myDevTypeID!=255) {
+        devRestartable[myDevTypeID] = false;
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct sdd1306_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust sdd1306 display poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          }
         queueData = myDevTypeID;
         iterType = 0;
         iterDev = 0;
@@ -70,7 +76,7 @@ class sdd1306 {
           }
         }
         delay (10000);
-        while (true) {
+        while (devTypeCount[myDevTypeID]>0) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
             consolewriteln ("Missing sdd1306 signal");
           }
@@ -112,6 +118,9 @@ class sdd1306 {
         }
       }
       else consolewriteln ("Could not determine sdd1306 type ID for update loop");
+      if (myDevTypeID!=255) {
+        util_deallocate (myDevTypeID);
+      }
       vTaskDelete( NULL );
     }
 
@@ -142,7 +151,7 @@ class sdd1306 {
         }
       }
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) "No sdd1306 displays found.");
+        // consolewriteln ((const char*) "No sdd1306 displays found.");
         return(false);  // nothing found!
       }
       // set up and inittialise structures
@@ -167,7 +176,10 @@ class sdd1306 {
           }
         }
       }
-
+      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+        if (myData[n].bus > 1) myData[n].isvalid = false;
+        if (myData[n].addr != dev_addr[0]) myData[n].isvalid = false;
+      }
       if (retval) xTaskCreate(updateloop, devType[myDevTypeID], 4096, NULL, 12, NULL);
       // inventory();
       myData = NULL;
@@ -180,11 +192,11 @@ class sdd1306 {
       char devStatus[9];
       struct sdd1306_s *myData;
 
-      consolewriteln ((const char*) "Test: sdd1306 - display");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No sdd1306 displays found.");
+        // consolewriteln ((const char*) " * No sdd1306 displays found.");
         return;
       }
+      consolewriteln ((const char*) "Test: sdd1306 - display");
       myData = (struct sdd1306_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         if (myData[device].isvalid) strcpy(devStatus, "OK");

@@ -33,6 +33,7 @@ class veml6075 {
 
     static void  updateloop(void *pvParameters)
     {
+      float xfrmResult;
       uint8_t myDevTypeID = 255;
       uint8_t queueData;
       struct veml6075_s *myData;
@@ -44,11 +45,18 @@ class veml6075 {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("veml6075");
       if (myDevTypeID!=255) {
+        devRestartable[myDevTypeID] = false;
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct veml6075_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust veml6075 UV poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
           for (int device=0; device <devTypeCount[myDevTypeID]; device++) {
@@ -63,11 +71,12 @@ class veml6075 {
             myData[device].uvb_average   = 0.0;
             myData[device].uvb_accum     = 0.0;
             myData[device].uvb_last      = 0.0;
+            myData[device].transform     = 0.0;
           }
           xSemaphoreGive(devTypeSem[myDevTypeID]);
         }
         // loop forever collecting data
-        while (true) {
+        while (devTypeCount[myDevTypeID]>0) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
             if (ansiTerm) displayAnsi(3);
             consolewriteln ("Missing veml6075 signal");
@@ -86,7 +95,6 @@ class veml6075 {
                     myData[device].uvb_last   = (myData[device].veml)->readUVB();
                     myData[device].uvb_accum += myData[device].uvb_last;
                   }
-                  xSemaphoreGive(wiresemaphore[myData[device].bus]);
                   // sprintf (msgBuffer, "UVI->%s", util_ftos (reading, 2));
                   // consolewriteln (msgBuffer);
                   if (reading < 13.0) {
@@ -110,16 +118,38 @@ class veml6075 {
                     consolewriteln ("Exceptionally high UV index reading ignored on veml6075 device\n");
                     if (ansiTerm) displayAnsi(1);
                   }
+                  xSemaphoreGive(wiresemaphore[myData[device].bus]);
                 }
               }
             }
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
+          //
+          // Update the transform variable only at the end of a monitoring cycle and outside of the accumulator updates
+          // this permit newly updated data to be included in the transformation calculation
+          //
+          for (int device=0; device <devTypeCount[myDevTypeID]; device++) if (myData[device].readingCount == 0) {
+            if (myData[device].isvalid) {
+              struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+              if (xfrm_Ptr != NULL) {
+                xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
+                  myData[device].transform = xfrmResult;
+                  xSemaphoreGive(devTypeSem[myDevTypeID]);
+                }
+              }
+            }
+          }
         }
       }
-      if (ansiTerm) displayAnsi(3);
-      consolewriteln ("Could not determine veml6075 type ID for update loop");
-      if (ansiTerm) displayAnsi(1);
+      if (myDevTypeID!=255) {
+        util_deallocate (myDevTypeID);
+      }
+      else {
+        if (ansiTerm) displayAnsi(3);
+        consolewriteln ("Could not determine veml6075 type ID for update loop");
+        if (ansiTerm) displayAnsi(1);
+      }
       vTaskDelete( NULL );
     }
 
@@ -155,7 +185,7 @@ class veml6075 {
         }
       }
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) "No veml6075 sensors found.");
+        // consolewriteln ((const char*) "No veml6075 sensors found.");
         return(false);  // nothing found!
       }
       // set up and inittialise structures
@@ -181,6 +211,13 @@ class veml6075 {
                 myData[devNr].state = 0;
                 retval = true;
                 metricCount[UV]++;
+                //
+                // get rpn transform
+                //
+                sprintf (msgBuffer, "veml6075Xfm_%d", devNr);  // Transformation Logic
+                util_getLogic (msgBuffer, &myData[devNr].xfrmLogic);
+                sprintf (msgBuffer, "veml6075Alt_%d", devNr);  // Transformation Name
+                nvs_get_string (msgBuffer, myData[devNr].xfrmName, "transform", sizeof (myData[devNr].xfrmName));
                 for (uint8_t level=0; level<3 ; level++) {
                   sprintf (ruleName, "vemluv_%d%d", level, devNr);  // Warning Logic
                   nvs_get_string (ruleName, msgBuffer, "disable", sizeof(msgBuffer));
@@ -210,6 +247,10 @@ class veml6075 {
           }
         }
       }
+      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+        if (myData[n].bus > 1) myData[n].isvalid = false;
+        if (myData[n].addr != dev_addr[0]) myData[n].isvalid = false;
+      }
       if (retval) xTaskCreate(updateloop, devType[myDevTypeID], 4096, NULL, 12, NULL);
       // inventory();
       myData = NULL;
@@ -222,11 +263,11 @@ class veml6075 {
       char devStatus[9];
       struct veml6075_s *myData;
 
-      consolewriteln ((const char*) "Test: veml6075 - UV Index");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No veml6075 sensors found.");
+        // consolewriteln ((const char*) " * No veml6075 sensors found.");
         return;
       }
+      consolewriteln ((const char*) "Test: veml6075 - UV Index");
       myData = (struct veml6075_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         if (myData[device].isvalid) {
@@ -255,13 +296,13 @@ class veml6075 {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = innerloop+YELLOW;
           }
-          retVal = testVal;
+          if (testVal>retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }
@@ -280,7 +321,13 @@ class veml6075 {
               util_getLogicTextXymon (myData[device].alert[currentState-YELLOW], xydata, currentState, myData[device].uniquename);
               strcat (xydata, " &");
               strcat (xydata, xymonColour[currentState]);
-              sprintf (msgBuffer, " %-16s %8s - average over %d readings\n", myData[device].uniquename, util_ftos (myData[device].uvi_average, 1), myData[device].averagedOver);
+              sprintf (msgBuffer, " %-16s %8s", myData[device].uniquename, util_ftos (myData[device].uvi_average, 1));
+              strcat  (xydata, msgBuffer);
+              if (myData[device].xfrmLogic != NULL) {
+                sprintf (msgBuffer, "  %8s %s", util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+                strcat  (xydata, msgBuffer);
+              }
+              sprintf (msgBuffer, " - average over %d readings\n", myData[device].averagedOver);
               strcat  (xydata, msgBuffer);
             }
             else {
@@ -319,6 +366,13 @@ class veml6075 {
               strcat  (xydata, msgBuffer);
               strcat  (xydata, "DS:index:GAUGE:600:U:U ");
               strcat  (xydata, util_ftos (myData[device].uvi_average, 1));
+              strcat  (xydata, "\n");
+            }
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[device].xfrmName, myData[device].uniquename);
+              strcat  (xydata, msgBuffer);
+              strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+              strcat  (xydata, util_ftos (myData[device].transform, 2));
               strcat  (xydata, "\n");
             }
           }
@@ -363,6 +417,10 @@ class veml6075 {
             consolewrite (" (");
             consolewrite ((char*) xymonColour[myData[device].state]);
             consolewriteln (")");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "veml6075.%d.xfrm (%s) %s (%s)", device, myData[device].uniquename, util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              consolewriteln (msgBuffer);
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -387,6 +445,7 @@ class veml6075 {
           else if (strcmp(parameter,"uvb") == 0 && myData[devNr].uvb_average>0.0) retval = myData[devNr].uvb_average;
           else if (strcmp(parameter,"lasb")== 0 && myData[devNr].uvb_last>0.0)    retval = myData[devNr].uvb_last;
           else if (strcmp(parameter,"usta")== 0) retval = myData[devNr].state;
+          else if (strcmp(parameter,"xfrm")== 0) retval = myData[devNr].transform;
           else retval = 0.00;
         }
         else retval=0.00;

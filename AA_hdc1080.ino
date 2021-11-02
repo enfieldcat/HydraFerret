@@ -30,27 +30,35 @@ class hdc1080 {
 
     static void  updateloop(void *pvParameters)
     {
-      uint8_t myDevTypeID = 255;
-      uint8_t queueData;
       struct hdc1080_s *myData;
-      char msgBuffer[SENSOR_NAME_LEN];
+      float xfrmResult;
+      float humidity, temperature;
       int pollInterval;
       int updateCount, loopCount; // UpdateCount = number of loop cycles per interval, loopCount = count of updates we attempted
       union {
         uint8_t bytes[4] = {0x02, 0x10, 0x00, 0x00};
         uint16_t ints[2];
       } result;
-      float humidity, temperature;
+      uint8_t myDevTypeID = 255;
+      uint8_t queueData;
       uint8_t tempByte;
+      char msgBuffer[SENSOR_NAME_LEN];
       
       loopCount = 0;
       myDevTypeID = util_get_dev_type("hdc1080");
       if (myDevTypeID!=255) {
+        devRestartable[myDevTypeID] = false;
+        util_deviceTimerCreate(myDevTypeID);
         myData = (struct hdc1080_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
         pollInterval = nvs_get_int (msgBuffer, DEFAULT_INTERVAL);
         updateCount = 300 / pollInterval;
         pollInterval = pollInterval * 1000; // now use poll interval in ms
+        if (xTimerChangePeriod(devTypeTimer[myDevTypeID], pdMS_TO_TICKS(pollInterval), pdMS_TO_TICKS(1100)) != pdPASS) {
+          consolewriteln("Unable to adjust hdc1080 temperature poll timer period, keep at 1 second");
+          pollInterval = 1000;
+          updateCount = 300;
+          }
         queueData = myDevTypeID;
         if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval+1000)) == pdTRUE) {
           for (int device=0; device <devTypeCount[myDevTypeID]; device++) {
@@ -62,12 +70,13 @@ class hdc1080 {
             myData[device].humid_average = 0.0;
             myData[device].humid_accum   = 0.0;
             myData[device].humid_last    = 0.0;
+            myData[device].transform     = 0.0;
             util_i2c_write (myData[device].bus, myData[device].addr, 3, result.bytes);
           }
           xSemaphoreGive(devTypeSem[myDevTypeID]);
         }
         // loop forever collecting data
-        while (true) {
+        while (devTypeCount[myDevTypeID]>0) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
             if (ansiTerm) displayAnsi(3);
             consolewriteln ("Missing hdc1080 signal");
@@ -115,15 +124,28 @@ class hdc1080 {
                   myData[device].humid_accum   = 0.0;
                   xSemaphoreGive(devTypeSem[myDevTypeID]);
                 }
+                struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+                if (xfrm_Ptr != NULL) {
+                  xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                  if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
+                    myData[device].transform = xfrmResult;
+                    xSemaphoreGive(devTypeSem[myDevTypeID]);
+                  }
+                }
               }
             }
             loopCount = 0;
           }
         }
       }
-      if (ansiTerm) displayAnsi(3);
-      consolewriteln ("Could not determine hdc1080 type ID for update loop");
-      if (ansiTerm) displayAnsi(1);
+      if (myDevTypeID!=255) {
+        util_deallocate (myDevTypeID);
+      }
+      else {
+        if (ansiTerm) displayAnsi(3);
+        consolewriteln ("Could not determine hdc1080 type ID for update loop");
+        if (ansiTerm) displayAnsi(1);
+      }
       vTaskDelete( NULL );
     }
 
@@ -162,7 +184,7 @@ class hdc1080 {
         }
       }
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) "No hdc1080 sensors found.");
+        // consolewriteln ((const char*) "No hdc1080 sensors found.");
         return(false);  // nothing found!
       }
       // set up and inittialise structures
@@ -171,10 +193,10 @@ class hdc1080 {
       devNr = 0;
       for (uint8_t bus=0; bus<2 && devNr<devTypeCount[myDevTypeID]; bus++) if (I2C_enabled[bus]) {
         for (int device=0; device < (sizeof(dev_addr)/sizeof(char)) && devNr<devTypeCount[myDevTypeID]; device++) {
+          myData[devNr].bus = bus;
+          myData[devNr].addr = dev_addr[device];
+          myData[devNr].isvalid = false;
           if (util_i2c_probe(bus, dev_addr[device])) {
-            myData[devNr].bus = bus;
-            myData[devNr].addr = dev_addr[device];
-            myData[devNr].isvalid = false;
             util_i2c_command (bus, (uint8_t) (dev_addr[device]), (uint8_t) 0xff);
             util_i2c_read    (bus, (uint8_t) (dev_addr[device]), (uint8_t) 2, check);
             if (check[0]==0x10 && check[1]==0x50) { // verify device type ID
@@ -184,6 +206,13 @@ class hdc1080 {
               sprintf (sensorName, "hdc1080DP_%d", devNr);
               nvs_get_string (sensorName, myData[devNr].dewpointName, "none", sizeof (myData[devNr].uniquename));
               retval = true;
+              //
+              // get rpn transform
+              //
+              sprintf (msgBuffer, "hdc1080Xfm_%d", devNr);  // Transformation Logic
+              util_getLogic (msgBuffer, &myData[devNr].xfrmLogic);
+              sprintf (msgBuffer, "hdc1080Alt_%d", devNr);  // Transformation Name
+              nvs_get_string (msgBuffer, myData[devNr].xfrmName, "transform", sizeof (myData[devNr].xfrmName));
               //
               // Process rules
               //
@@ -218,6 +247,10 @@ class hdc1080 {
           if (devNr<devTypeCount[myDevTypeID]) myData[devNr].isvalid = false;
         }
       }
+      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+        if (myData[n].bus > 1) myData[n].isvalid = false;
+        if (myData[n].addr != dev_addr[0]) myData[n].isvalid = false;
+      }
       if (retval) xTaskCreate(updateloop, devType[myDevTypeID], 4096, NULL, 12, NULL);
       // inventory();
       // myData = NULL;
@@ -230,11 +263,11 @@ class hdc1080 {
       char devStatus[9];
       struct hdc1080_s *myData;
 
-      consolewriteln ((const char*) "Test: hdc1080 - Temperature & Humidity");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No hdc1080 sensors found.");
+        // consolewriteln ((const char*) " * No hdc1080 sensors found.");
         return;
       }
+      consolewriteln ((const char*) "Test: hdc1080 - Temperature & Humidity");
       myData = (struct hdc1080_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         if (myData[device].isvalid) {
@@ -254,7 +287,7 @@ class hdc1080 {
       uint8_t retVal  = GREEN;    // Worst score for all tests of this type
       uint8_t testVal = GREEN;    // Score for the currently evaluated sensor
       uint8_t tStart, tEnd, idx;  // indexes to pointers for tests taken
-      struct hdc1080_s *myData;    // Pointer to data.
+      struct hdc1080_s *myData;   // Pointer to data.
 
       switch (testType) {
         case TEMP:  tStart = 0; tEnd = 3; idx = 0; break;
@@ -269,13 +302,13 @@ class hdc1080 {
             struct rpnLogic_s *alertPtr = myData[devNr].alert[innerloop];
             if (alertPtr != NULL && rpn_calc(alertPtr->count, alertPtr->term)>0) testVal = (innerloop-tStart)+1;
           }
-          retVal = testVal;
+          if (testVal > retVal) retVal = testVal;
           if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(290000)) == pdTRUE) {
             myData[devNr].state[idx] = testVal;
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
         }
-        else retVal = CLEAR;
+        // else retVal = CLEAR;
       }
       return (retVal);
     }
@@ -312,8 +345,13 @@ class hdc1080 {
               }
             }
             else if (measureType==HUMID) {
-              sprintf (msgBuffer, " &%s %-16s %8s%%\n", xymonColour[currentState], myData[device].uniquename, util_ftos (myData[device].humid_average, 2));
+              sprintf (msgBuffer, " &%s %-16s %8s%%", xymonColour[currentState], myData[device].uniquename, util_ftos (myData[device].humid_average, 2));
               strcat  (xydata, msgBuffer);
+              if (myData[device].xfrmLogic != NULL) {
+                sprintf (msgBuffer, "   %8s %s\n", util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+                strcat  (xydata, msgBuffer);
+              }
+              else strcat (xydata, "\n");
             }
           }
           else // if (measureType != TEMP) {
@@ -360,6 +398,13 @@ class hdc1080 {
               strcat  (xydata, util_ftos (myData[device].humid_average, 2));
               strcat  (xydata, "\n");
             }
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[device].xfrmName, myData[device].uniquename);
+              strcat  (xydata, msgBuffer);
+              strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+              strcat  (xydata, util_ftos (myData[device].transform, 2));
+              strcat  (xydata, "\n");
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -389,7 +434,7 @@ class hdc1080 {
     void printData()
     {
       struct hdc1080_s *myData;
-      char msgBuffer[40];
+      char msgBuffer[64];
       char stateType[2][5] = {"tsta", "hsta"};      
       
       sprintf (msgBuffer, "hdc1080.dev %d", devTypeCount[myDevTypeID]);
@@ -443,6 +488,10 @@ class hdc1080 {
             consolewrite (msgBuffer);
             consolewrite (util_ftos (util_speedOfSound(myData[device].temp_last, myData[device].humid_last), 1));
             consolewriteln (" m/s");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "hdc1080.%d.xfrm (%s) %s (%s)", device, myData[device].uniquename, util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              consolewriteln (msgBuffer);
+            }
             for (uint8_t staLoop=0 ;staLoop<2; staLoop++) {
               sprintf (msgBuffer, "hdc1080.%d.%s (%s) ", device, stateType[staLoop], myData[device].uniquename);
               consolewrite (msgBuffer);
@@ -478,6 +527,7 @@ class hdc1080 {
           else if (strcmp(parameter,"lasd") == 0) retval = util_dewpoint(myData[devNr].temp_last,    myData[devNr].humid_last);
           else if (strcmp(parameter,"sos")  == 0) retval = util_speedOfSound(myData[devNr].temp_average, myData[devNr].humid_average);
           else if (strcmp(parameter,"lass") == 0) retval = util_speedOfSound(myData[devNr].temp_last,    myData[devNr].humid_last);
+          else if (strcmp(parameter,"xfrm") == 0) retval = myData[devNr].transform;
           else retval = 0.00;
         }
         else retval=0.00;

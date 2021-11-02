@@ -222,7 +222,7 @@ void displayAnsi (int index)
 {
   uint8_t lim;
 
-  if (xSemaphoreTake(consoleSemaphore, pdMS_TO_TICKS(1000)) == pdTRUE) {
+  if (xSemaphoreTake(consoleSemaphore, pdMS_TO_TICKS(5000)) == pdTRUE) {
     consolewriteNoSem ((uint8_t) 27);
     consolewriteNoSem ((uint8_t) '[');
     lim=strlen((char*) ansiString[index]);
@@ -780,6 +780,7 @@ void mt_parse_command (char *cmdBuffer)
   else if ((nparam==3 || nparam==1 || nparam == 6) && strcmp (param[0], "adc") == 0) mt_adc      (nparam, param);
   else if (nparam<=3 && strcmp (param[0], "altitude") == 0)                          mt_altitude (nparam, param);
   else if (nparam<=3 && strcmp (param[0], "ansi") == 0)                              mt_ansi     (nparam, param);
+  else if (nparam<=3 && strcmp (param[0], "ap") == 0)                                mt_ap       (nparam, param);
 #ifdef USE_BLUETOOTH
   else if (nparam<=2 && strcmp (param[0], "bluetooth") == 0)                         mt_bluetooth(nparam, param);
 #endif
@@ -793,13 +794,15 @@ void mt_parse_command (char *cmdBuffer)
   else if ((nparam==1 || nparam>4) && (strcmp (param[0], "warning") == 0 || strcmp (param[0], "critical") == 0 || strcmp (param[0], "extreme") == 0)) {
     mt_set_alert (nparam, param);
   }
+  else if (nparam<=2 && strcmp (param[0], "debug")== 0)      mt_debug        (nparam, param);
   else if (nparam==2 && strcmp (param[0], "del")  == 0)      util_deleteFile (SPIFFS, param[1]);
   else if ((nparam<=2 || nparam==4) && strcmp (param[0], "devicename") == 0) mt_set_devicename(nparam, param);
   else if ((nparam==1 || nparam==4) && strcmp (param[0], "dewpoint") == 0)   mt_set_dewpoint(nparam, param);
-  else if (nparam==1 && strcmp (param[0], "dir")  == 0)      util_listDir (SPIFFS, "/", 0);
+  else if (nparam==1 && strcmp (param[0], "dir")  == 0)      util_listDir    (SPIFFS, "/", 0);
   else if (nparam==2 && strcmp (param[0], "dump") == 0)      mt_dump          (nparam, param);
   else if (nparam<=2 && (strcmp (param[0], "enable") == 0 || strcmp (param[0], "disable") == 0)) mt_enable (nparam, param);
   else if (nparam==2 && strcmp (param[0], "erase")==0 && strcmp (param[1], "config")== 0) mt_erase_config();
+  else if ((nparam==1 || nparam == 4) && strcmp (param[0], "frequency") == 0)  mt_frequency   (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "help") == 0) {
     if (nparam==2) mt_help (param[1]);
     else mt_help (NULL);
@@ -809,26 +812,33 @@ void mt_parse_command (char *cmdBuffer)
   else if (nparam==1 && strcmp (param[0], "history")   == 0) mt_history       (nparam, param);
   else if (nparam<=3 && strcmp (param[0], "identify")  == 0) mt_identify      (nparam, param);
   else if ((nparam==1 || nparam==3) && strcmp (param[0], "interval") == 0) mt_dev_interval (nparam, param);
-  else if (nparam==1 && strcmp (param[0], "inventory") == 0) mt_inventory     (nparam, param);
+  else if (nparam<=2 && strcmp (param[0], "inventory") == 0) mt_inventory     (nparam, param);
   else if (nparam<=2 && (strcmp (param[0], "list") == 0 || strcmp (param[0], "show") == 0)) mt_list (nparam, param);
+  else if (nparam>1 && nparam<=3 && strcmp (param[0], "mdns") == 0) mt_mdns   (nparam, param);
   else if (nparam<=2 &&  strcmp (param[0], "ntp") == 0)      mt_ntp           (nparam, param);
   else if (nparam==2 && (strcmp (param[0], "nvsstr") == 0 ||strcmp (param[0], "nvsint") == 0 || strcmp (param[0], "nvsfloat") == 0)) mt_get_nvs (nparam, param);
   else if ((nparam==1 || nparam==3 || nparam==4) && strcmp (param[0], "onewire") == 0) mt_set_dallas (nparam, param);
   else if ((nparam==1 || nparam==4) && strcmp (param[0], "opacity") == 0) mt_set_opacity (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "ota") == 0)       mt_ota           (nparam, param);
   else if (nparam!=2 && strcmp (param[0], "output") == 0)    mt_output        (nparam, param);
+  else if (nparam<=2 && strcmp (param[0], "outputwait") == 0) mt_outputWait   (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "password") == 0)  mt_set_password  (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "quit") == 0)      mt_quit          (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "qnh") == 0)       mt_set_qnh       (nparam, param);
   else if (nparam==2 && strcmp (param[0], "read")  == 0)     util_readFile    (SPIFFS, param[1]);
   else if ((nparam==1 || nparam == 4) && strcmp (param[0], "resistor") == 0)  mt_resistor (nparam, param);
+  else if (nparam==2 && (strcmp (param[0], "rescan") == 0 || strcmp (param[0], "remove") == 0))   mt_rescan        (nparam, param);
   else if (nparam==1 && strcmp (param[0], "restart") == 0)   mt_sys_restart   ("command line request");
   else if (nparam>1  && strcmp (param[0], "rpn") == 0)       rpn_calc         (nparam, param);
   else if ((nparam==1 || nparam==3 || (nparam>=4 && nparam<=6)) && strcmp (param[0], "serial")==0) mt_serial (nparam, param);
   else if (nparam==1 && strcmp (param[0], "scan") == 0)      util_i2c_scan();
+  else if ((nparam==1 || nparam == 3) && strcmp (param[0], "switch") == 0)  mt_switch (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "telnet") == 0)    mt_telnet        (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "terminate") == 0) mt_set_terminate (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "timezone") == 0)  mt_set_timezone  (nparam, param);
+  else if ((nparam==1 || nparam > 3)  && strcmp (param[0], "transform") == 0) mt_transform (nparam, param);
+  else if ((nparam==1 || nparam == 4) && strcmp (param[0], "transformname") == 0) mt_transformName (nparam, param);
+  else if ((nparam==1 || nparam == 4) && strcmp (param[0], "trigger") == 0) mt_trigger (nparam, param);
   else if (nparam<=4 && strcmp (param[0], "wifi") == 0)      mt_set_wifi      (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "wifimode") == 0)  mt_set_wifimode  (nparam, param);
   else if (nparam<=2 && strcmp (param[0], "wifiscan") == 0)  mt_set_wifiscan  (nparam, param);
@@ -1053,6 +1063,87 @@ void mt_set_password (int nparam, char **param)
 }
 
 
+void mt_ap (int nparam, char **param)
+{
+if (nparam == 1) {
+  char ap_name[32];
+  char ap_passwd[32];
+  int  ap_number;
+  nvs_get_string ("ap_name", ap_name, device_name, sizeof(ap_name));
+  nvs_get_string ("ap_passwd", ap_passwd, "MySecret", sizeof(ap_passwd));
+  consolewrite (" * Access Point Name: ");
+  consolewriteln (ap_name);
+  consolewrite (" *          Password: ");
+  consolewriteln (ap_passwd);
+  nvs_get_string ("ap_ip", ap_passwd, AP_IP_ADDRESS, sizeof(ap_passwd));
+  consolewrite (" *        IP Address: ");
+  consolewriteln (ap_passwd);
+  ap_number = nvs_get_int ("ap_channel", 1);
+  sprintf (ap_passwd, "%d", ap_number);
+  consolewrite (" *      WiFi Channel: ");
+  consolewriteln (ap_passwd);
+  ap_number = nvs_get_int ("ap_hidden", 0);
+  consolewrite (" *       Hidden SSID: ");
+  if (ap_number == 0) consolewriteln ("false");
+  else consolewriteln ("true");
+  ap_number = nvs_get_int ("ap_connects", 4);
+  sprintf (ap_passwd, "%d", ap_number);
+  consolewrite (" *  Max. Connections: ");
+  consolewriteln (ap_passwd);
+  }
+else if (nparam<=3) {
+  if (strcmp (param[1], "ip") == 0 && nparam == 3) {
+    // quick check for ip addess
+    uint8_t bytes[4] = { 0, 0, 0, 0};
+    uint8_t result = 0;
+    mk_address (param[2], bytes);
+    if (bytes[0] != 0 && (bytes[3]%32) != 0) {
+      nvs_put_string ("ap_ip", param[2]);
+      }
+    else consolewriteln ("AP IP address appears to be invalid");
+    }
+  else if (strcmp (param[1], "channel") == 0 && nparam == 3 && util_str_isa_int(param[2])) {
+    int channel = util_str2int(param[2]);
+    if (channel > 0 && channel < 15) {
+      nvs_put_int ("ap_channel", channel);
+      }
+    else {
+      consolewriteln ("WiFi channel should be between 1 and 14");
+      }
+    }
+  else if (strcmp (param[1], "hidden") == 0 && nparam == 3) {
+    if (strcmp(param[2], "true")==0 || strcmp(param[2], "false")) {
+      int hidden = 0;
+      if (strcmp(param[2], "true")==0) hidden = 1;
+      nvs_put_int ("ap_hidden", hidden);
+      }
+    else consolewriteln ("hidden parameter should be either true or false");
+    }
+  else if (strcmp (param[1], "connects") == 0 && nparam == 3 && util_str_isa_int(param[2])) {
+    int connects = util_str2int(param[2]);
+    if (connects > 0 && connects < 14) {
+      nvs_put_int ("ap_connects", connects);
+      }
+    else {
+      consolewriteln ("WiFi max connections should be between 1 and 13");
+      }
+    }
+  else if (strcmp (param[1], "start") == 0) {
+    net_start_ap();
+    }
+  else {
+    if (strcmp (param[1], "none") != 0 && strlen(param[1]) < 8) {
+      consolewriteln ("AP password should be at least 8 characters long.");
+      }
+    else {
+      nvs_put_string ("ap_passwd", param[1]);
+      if (nparam==3) nvs_put_string ("ap_name", param[2]);
+      }
+    }
+  }
+}
+
+
 void mt_clear (int nparam, char **param)
 {
   const uint8_t string[] = { 27, '[', '2', 'J', 27, '[', 'H', '\0' };
@@ -1093,26 +1184,161 @@ void mt_cert (int nparam, char **param)
   }
 }
 
+
+void mt_debug (int nparam, char **param)
+{
+int  level = 0;
+char outBuffer[3];
+
+if (nparam==1) {
+  level = nvs_get_int ("debug", 0);
+  sprintf (outBuffer, "%d", level);
+  consolewrite ("debug level = ");
+  consolewriteln (outBuffer);
+  }
+else {
+  if (util_str_isa_int(param[1])) {
+    level = util_str2int (param[1]);
+    if (level<0 || level>3) consolewriteln ("Debug level is between 0 - 3");
+    else {
+      debugLevel = level;
+      nvs_put_int ("debug", level);
+      }
+    }
+  else consolewriteln ("Debug level is between 0 - 3");
+  }
+}
+
+
+/*
+ * Define / view trigger pin to use with distance measurement
+ */
+void mt_trigger (int nparam, char **param)
+{
+  char compensateDevType[1][8] = { "pfc8583" };
+  char msgBuffer[100];
+  uint8_t n, i, typeNr;
+  uint8_t maxdevtypes = 1;
+
+  if (nparam==1) {
+    for (n=0; n<maxdevtypes; n++) {
+      typeNr = util_get_dev_type(compensateDevType[n]);
+      consolewriteln ("Use trigger pin 0 to disable trigger function");
+      for (i=0; i<devTypeCount[typeNr]; i++) {
+        sprintf (msgBuffer, " * %s[%d] trigger pin is %d", compensateDevType[n], i, ((struct pfc8583_s*)devData[typeNr])[i].triggerPin);
+        consolewriteln (msgBuffer);
+      }
+    }
+  }
+  else if (nparam == 4) {
+    i = 0;
+    for (n=0; n<maxdevtypes && i < 1; n++) {
+      if (strcmp (param[1], compensateDevType[n]) == 0) { i = 1; typeNr = n; }
+    }
+    if (i == 0) {
+      consolewriteln ("Device type may be one of:");
+      for (n=0; n< maxdevtypes; n++) {
+        consolewrite (" * ");
+        consolewriteln (compensateDevType[n]);
+      }
+    }
+    else {
+      if (util_str_isa_int(param[2]) && util_str_isa_int(param[3])) {
+        n = util_str2int (param[2]);
+        i = util_str2int (param[3]);
+        if (n<0 || n>= devTypeCount[util_get_dev_type(compensateDevType[typeNr])]) {
+          sprintf (msgBuffer, "Warning: Device index %d is higher than the maximum index of installed %s devices", n, compensateDevType[typeNr]);
+          consolewriteln (msgBuffer);
+        }
+        else {
+          ((struct pfc8583_s*)devData[util_get_dev_type(compensateDevType[typeNr])])[n].triggerPin = i;
+        }
+        sprintf (msgBuffer, "%strg%d", compensateDevType[typeNr], n);
+        nvs_put_int (msgBuffer, i);
+      }
+      else consolewriteln ("Error: Device index and trigger pin should be integer numbers.");
+    }
+  }
+}
+
+
+/*
+ * Define / view frequency to use as a base for distance measurement
+ */
+void mt_frequency (int nparam, char **param)
+{
+  int32_t freq;
+  char compensateDevType[1][8] = { "pfc8583" };
+  char msgBuffer[100];
+  uint8_t n, i, typeNr;
+  uint8_t maxdevtypes = 1;
+  
+  if (nparam==1) {
+    for (n=0; n<maxdevtypes; n++) {
+      typeNr = util_get_dev_type(compensateDevType[n]);
+      for (i=0; i<devTypeCount[typeNr]; i++) {
+        sprintf (msgBuffer, " * %s[%d] ref frequency is %ldHz", compensateDevType[n], i, ((struct pfc8583_s*)devData[typeNr])[i].ref_frequency);
+        consolewriteln (msgBuffer);
+      }
+    }
+  }
+  else if (nparam == 4) {
+    i = 0;
+    for (n=0; n<maxdevtypes && i < 1; n++) {
+      if (strcmp (param[1], compensateDevType[n]) == 0) { i = 1; typeNr = n; }
+    }
+    if (i == 0) {
+      consolewriteln ("Device type may be one of:");
+      for (n=0; n< maxdevtypes; n++) {
+        consolewrite (" * ");
+        consolewriteln (compensateDevType[n]);
+      }
+    }
+    else {
+      if (util_str_isa_int(param[2]) && util_str_isa_int(param[3])) {
+        n = util_str2int (param[2]);
+        freq = util_str2int (param[3]);
+        if (n<0 || n>= devTypeCount[util_get_dev_type(compensateDevType[typeNr])]) {
+          sprintf (msgBuffer, "Warning: Device index %d is higher than the maximum index of installed %s devices", n, compensateDevType[typeNr]);
+          consolewriteln (msgBuffer);
+        }
+        else {
+          ((struct pfc8583_s*)devData[util_get_dev_type(compensateDevType[typeNr])])[n].ref_frequency = freq;
+        }
+        sprintf (msgBuffer, "%sfrq%d", compensateDevType[typeNr], n);
+        nvs_put_int (msgBuffer, freq);
+      }
+      else consolewriteln ("Error: Device index and reference frequency should be integer numbers.");
+    }
+  }
+}
+
 /*
  * 
  */
 void mt_compensate (int nparam, char **param)
 {
-  char compensateDevType[][7] = { "css811" };
+  char compensateDevType[][8] = { "css811", "pfc8583" };
   char msgBuffer[80];
   uint8_t n, i, typeNr;
   
   if (nparam==1) {
-    for (n=0; n<1; n++) {
+    for (n=0; n<2; n++) {
       typeNr = util_get_dev_type(compensateDevType[n]);
       for (i=0; i<devTypeCount[typeNr]; i++) {
         sprintf (msgBuffer, " * %s[%d] temp/humidity comp from ", compensateDevType[n], i);
         consolewrite (msgBuffer);
         if (n == 0) {
           if (((struct css811_s*) devData[typeNr])[i].compensationDevType >= numberOfTypes)
-            strcmp (msgBuffer, "unknown device type (uncompensated)");
+            strcpy (msgBuffer, "unknown device type (uncompensated)");
           else sprintf (msgBuffer, "%s[%d]", devType[((struct css811_s*) devData[typeNr])[i].compensationDevType],
                                                 ((struct css811_s*) devData[typeNr])[i].compensationDevNr);
+        }
+        else if (n == 1) {
+          if (((struct pfc8583_s*) devData[typeNr])[i].compensationDevType >= numberOfTypes)
+            strcpy (msgBuffer, "unknown device type (uncompensated)");
+          else sprintf (msgBuffer, "%s[%d]", devType[((struct pfc8583_s*) devData[typeNr])[i].compensationDevType],
+                                                ((struct pfc8583_s*) devData[typeNr])[i].compensationDevNr);
         }
         consolewriteln (msgBuffer);
       }
@@ -1122,7 +1348,7 @@ void mt_compensate (int nparam, char **param)
     if (util_str_isa_int(param[2]) && util_str_isa_int(param[4])) {
       n = util_str2int (param[2]);
       i = util_str2int (param[4]);
-      if (strcmp (param[1], "css811") == 0) {
+      if (strcmp (param[1], "css811") == 0 || strcmp (param[1], "pfc8583") == 0) {
         if (strcmp (param[3], "hdc1080") == 0 || strcmp(param[3], "bme280") == 0) {
           // if (strcmp (param[1], "css811") == 0 && (struct css811_t*) devData[]
           sprintf (msgBuffer, "%s_c%d_type", param[1], n);
@@ -1137,7 +1363,7 @@ void mt_compensate (int nparam, char **param)
       }
       else {
         if (ansiTerm) displayAnsi(3);
-        consolewriteln ("device to compensate should be css811");
+        consolewriteln ("device to compensate should be css811 or pfc8583");
       }
     }
     else {
@@ -1247,17 +1473,37 @@ void mt_constant(int nparam, char **param)
 
 void mt_inventory(int nparam, char **param)
 {
-  consolewriteln ("Test: Counter");
-  mt_counter (1, param);
-  the_adc.inventory();
-  the_bh1750.inventory();
-  the_bme280.inventory();
-  the_css811.inventory();
-  the_hdc1080.inventory();
-  the_ina2xx.inventory();
-  the_veml6075.inventory();
-  the_serial.inventory();
-  the_sdd1306.inventory();
+  if (nparam == 1 || strcmp(param[1],"standard")==0 || strcmp(param[1],"full")==0) {
+    char msgBuffer[40];
+    uint8_t full = 0;
+    if (nparam == 2 && strcmp(param[1],"full")==0) full = 1;
+    if (ansiTerm) displayAnsi(4);
+    consolewriteln ("Index Device     Count");
+    if (ansiTerm) displayAnsi(0);
+    for (uint8_t n = 0; n<numberOfTypes; n++) if (full==1 || devTypeCount[n]>0) {
+      sprintf (msgBuffer, " * %2u %-10s %d", n, devType[n], devTypeCount[n]);
+      consolewriteln (msgBuffer);
+      }
+    }
+  else if (nparam == 2 && (strcmp(param[1], "ext")==0 || strcmp(param[1],"extended")==0)) {
+    consolewriteln ("Test: Counter");
+    mt_counter (1, param);
+    the_adc.inventory();
+    the_bh1750.inventory();
+    the_bme280.inventory();
+    the_css811.inventory();
+    the_hdc1080.inventory();
+    the_ina2xx.inventory();
+    the_pfc8583.inventory();
+    the_serial.inventory();
+    the_sdd1306.inventory();
+    the_switch.inventory();
+    the_veml6075.inventory();
+  }
+  else {
+    if (ansiTerm) displayAnsi(3);
+    consolewriteln ("inventory parameter invalid");
+  }
 }
 
 void mt_set_cpuspeed(int nparam, char **param)
@@ -1411,6 +1657,25 @@ void mt_combineName (int nparam, char **param)
 }
 
 /*
+ * mDNS queries
+ */
+void mt_mdns (int nparam, char **param)
+{
+  char protoUsed[4] = "tcp";
+
+  if (nparam==3) {
+    if (strcmp (param[2], "tcp") == 0 || strcmp (param[2], "udp") == 0) strcpy (protoUsed, param[2]);
+    else {
+      consolewrite (param[2]);
+      consolewriteln (" is not an IP protocol, used ether tcp or udp");
+      return;
+    }
+  }
+  net_mdns_browse (param[1], protoUsed);
+}
+
+
+/*
  * Display configuration
  */
 void mt_set_devicename (int nparam, char **param)
@@ -1452,9 +1717,11 @@ else if (nparam == 4) {
       else if (strcmp ("veml6075",  param[1]) == 0) strcpy(((struct veml6075_s*)    devData)[n].uniquename, param[3]);
       else if (strcmp ("bh1750",    param[1]) == 0) strcpy(((struct bh1750_s*)      devData)[n].uniquename, param[3]);
       else if (strcmp ("hdc1080",   param[1]) == 0) strcpy(((struct hdc1080_s*)     devData)[n].uniquename, param[3]);
+      else if (strcmp ("pfc8583",   param[1]) == 0) strcpy(((struct pfc8583_s*)     devData)[n].uniquename, param[3]);
       else if (strcmp ("ina2xx",    param[1]) == 0) strcpy(((struct ina2xx_s*)      devData)[n].uniquename, param[3]);
       else if (strcmp ("output",    param[1]) == 0) strcpy(((struct output_s*)      devData)[n].uniquename, param[3]);
       else if (strcmp ("serial",    param[1]) == 0) strcpy(((struct zebSerial_s*)   devData)[n].uniquename, param[3]);
+      else if (strcmp ("switch",    param[1]) == 0) strcpy(((struct switch_s*)      devData)[n].uniquename, param[3]);
       }
     else {
       if (strcmp ("ds1820", param[1]) != 0) {
@@ -1662,6 +1929,48 @@ void mt_serial (int nparam, char **param)
 
 
 /*
+ * Set up switch inputs
+ */
+void mt_switch (int nparam, char **param)
+{
+  char paramName[25];
+  char msgBuffer[25];
+
+  uint8_t pin, swNr;
+
+  if (nparam == 1) {
+    the_switch.inventory();
+  }
+  else if (util_str_isa_int (param[1])) {
+    swNr = util_str2int (param[1]);
+    if (util_str_isa_int (param[2])) {
+      pin = util_str2int (param[2]);
+      if (pin<40 && pin>=0) {
+        sprintf (paramName, "switchPin_%d", swNr);
+        nvs_put_int (paramName, pin);
+      }
+      else {
+        if (ansiTerm) displayAnsi(3);
+        consolewriteln ("Switch pin should be 0-39.");
+      }
+    }
+    else if (strcmp(param[2], "disable") == 0) {
+      sprintf (paramName, "switchPin_%d", swNr);
+      nvs_put_int (paramName, 99);
+    }
+    else {
+      if (ansiTerm) displayAnsi(3);
+      consolewriteln ("2nd parameter should be pin number or either high or low.");
+    }
+  }
+  else {
+    if (ansiTerm) displayAnsi(3);
+    consolewriteln ("Switch number should be numeric.");
+  }
+}
+
+
+/*
  * Dump structures
  */
 void mt_dump (int nparam, char **param)
@@ -1737,6 +2046,9 @@ void mt_dump (int nparam, char **param)
   else if (strcmp(param[1], "ds1820") == 0) {
     for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct dallasTemp_s*)   devData[tPtr])[dPtr]), sizeof(struct dallasTemp_s));
   }
+  else if (strcmp(param[1], "pfc8583") == 0) {
+    for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct pfc8583_s*)      devData[tPtr])[dPtr]), sizeof(struct pfc8583_s));
+  }
   else if (strcmp(param[1], "css811") == 0) {
     for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct css811_s*)       devData[tPtr])[dPtr]), sizeof(struct css811_s));
   }
@@ -1749,18 +2061,11 @@ void mt_dump (int nparam, char **param)
   else if (strcmp(param[1], "ina2xx") == 0) {
     for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct ina2xx_s*)       devData[tPtr])[dPtr]), sizeof(struct ina2xx_s));
   }
+  else if (strcmp(param[1], "switch") == 0) {
+    for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct switch_s*)       devData[tPtr])[dPtr]), sizeof(struct switch_s));
+  }
   else if (strcmp(param[1], "veml6075") == 0) {
-    for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) {
-      util_dump ((char*) &(((struct veml6075_s*) devData[tPtr])[dPtr]), sizeof(struct veml6075_s));
-      for (uint8_t innerloop=0; innerloop<3; innerloop++) {
-        rpnPtr =  ((struct veml6075_s) (((struct veml6075_s*) devData[tPtr])[dPtr])).alert[innerloop];
-        if (rpnPtr != NULL) {
-          consolewrite ((char*) xymonColour[innerloop+1]);
-          consolewriteln (" alert logic:");
-          util_dump ((char*) rpnPtr, rpnPtr->size);
-        }
-      }
-    }
+    for (dPtr=0; dPtr<devTypeCount[tPtr]; dPtr++) util_dump ((char*) &(((struct veml6075_s*)     devData[tPtr])[dPtr]), sizeof(struct veml6075_s));
   }
   else if (strcmp(param[1], "output")   == 0) {
     struct output_s *serPtr;
@@ -1799,6 +2104,9 @@ void mt_enable (int nparam, char **param)
     consolewrite (" * ansi (ANSI colorized terminal) ");
     if (ansiTerm) consolewriteln ("enabled");
     else consolewriteln ("disabled");
+    consolewrite (" * ap (WiFi access point, recommended setting disabled) ");
+    if (nvs_get_int ("wifi_ap", 1) == 1) consolewriteln ("enabled");
+    else consolewriteln ("disabled");
     consolewrite (" * consolelog (console logging to file) ");
     if (consolelog) consolewriteln ("enabled");
     else consolewriteln ("disabled");
@@ -1812,7 +2120,7 @@ void mt_enable (int nparam, char **param)
     if (nvs_get_int ("otaonboot", 0) == 1) consolewriteln ("enabled");
     else consolewriteln ("disabled");
     consolewrite (" * startupdelay (60 second boot startup delay) ");
-    if (nvs_get_int ("startupDelay", 0) == 1) consolewriteln ("enabled");
+    if (nvs_get_int ("startupDelay", 1) == 1) consolewriteln ("enabled");
     else consolewriteln ("disabled");
     consolewrite (" * showlogic (Display alert logic on xymon console) ");
     if (nvs_get_int ("showlogic", 0) == 1) consolewriteln ("enabled");
@@ -1822,6 +2130,9 @@ void mt_enable (int nparam, char **param)
       if (wifimode == 0) consolewriteln ("enabled");
       else consolewriteln ("disabled in ondemand mode");
     }
+    else consolewriteln ("disabled");
+    consolewrite (" * mdns (multicast DNS service) ");
+    if (nvs_get_int ("mdns", 1) == 1 && wifimode == 0) consolewriteln ("enabled");
     else consolewriteln ("disabled");
   }
   else {
@@ -1845,6 +2156,14 @@ void mt_enable (int nparam, char **param)
         ansiTerm = false;
       }
     }
+    else if (strcmp(param[1], "ap") == 0) {
+      if (strcmp(param[0], "enable") == 0) {
+        nvs_put_int ("wifi_ap", 1);
+      }
+      else {
+        nvs_put_int ("wifi_ap", 0);
+      }
+    }
     else if (strcmp(param[1], "memory") == 0) {
       if (strcmp(param[0], "enable") == 0) {
         nvs_put_int ("memorystats", 1);
@@ -1853,6 +2172,19 @@ void mt_enable (int nparam, char **param)
       else {
         nvs_put_int ("memorystats", 0);
         showMemory = false;
+      }
+    }
+    else if (strcmp(param[1], "mdns") == 0) {
+      if (strcmp(param[0], "enable") == 0) {
+        nvs_put_int ("mdns", 1);
+        ansiTerm = true;
+        if (wifimode != 0) {
+          consolewriteln ("WARNING: Wifi should be in always on mode for mDNS to work.");
+        }
+      }
+      else {
+        nvs_put_int ("mdns", 0);
+        ansiTerm = false;
       }
     }
     else if (strcmp(param[1], "output") == 0) {
@@ -1957,9 +2289,11 @@ void mt_list (int nparam, char **param)
         else if (strcmp (devType[n], "veml6075") == 0) the_veml6075.printData();
         else if (strcmp (devType[n], "css811")   == 0) the_css811.printData();
         else if (strcmp (devType[n], "ina2xx")   == 0) the_ina2xx.printData();
+        else if (strcmp (devType[n], "pfc8583")  == 0) the_pfc8583.printData();
         else if (strcmp (devType[n], "counter")  == 0) theCounter.printData();
         else if (strcmp (devType[n], "output")   == 0) the_output.printData();
         else if (strcmp (devType[n], "serial")   == 0) the_serial.printData();
+        else if (strcmp (devType[n], "switch")   == 0) the_switch.printData();
         else if (strcmp (devType[n], "adc")      == 0) the_adc.printData();
       }
     }
@@ -2101,6 +2435,28 @@ void mt_ota (int nparam, char **param)
 /* 
  *  Handle output configuration
  */
+void mt_outputWait (int nparam, char **param)
+{
+  uint16_t waitSecs;
+  
+  if (nparam == 0) {
+    char msgBuffer[40];
+    waitSecs = nvs_get_int ("outputWaitSec", 300);
+    sprintf (msgBuffer, " * Output wait: %d seconds", waitSecs);
+    consolewriteln (msgBuffer);  
+  }
+  else {
+    if (util_str_isa_int (param[1])) {
+      waitSecs = util_str2int(param[1]);
+      if (waitSecs > 0 && waitSecs<= 3600) {
+        nvs_put_int ("outputWaitSec", waitSecs);
+      }
+      else consolewriteln ("Output delay should be between 1 and 3600 seconds");
+    }
+  }
+}
+
+
 void mt_output (int nparam, char **param)
 {
   uint8_t outDeviceType = util_get_dev_type("output");
@@ -2536,6 +2892,54 @@ void mt_identify (int nparam, char **param)
 
 
 /*
+ * Rescan a device
+ */
+void mt_rescan (int nparam, char **param)
+  {
+  const char nopermit[][8] = {"counter", "adc", "ds1820",  "output", "serial", "switch"};
+  uint8_t dev2rescan = util_get_dev_type(param[1]);
+  int16_t loopCount=610;
+  
+  if (nparam==1) {
+    consolewriteln ("Give a i2c device type to rescan or remove as a parameter");
+    return;
+    }
+  if (dev2rescan >200) {
+    consolewriteln ("Unknown type to rescan or remove - no action taken");
+    return;
+    }
+  for (uint8_t n=0; n<6; n++) if (strcmp (param[1], nopermit[n]) == 0) {
+    consolewrite ("Cannot rescan or remove type ");
+    consolewriteln (param[1]);
+    return;
+    }
+  devTypeCount[dev2rescan] = 0;
+  consolewrite ("Waiting for ");
+  consolewrite (param[1]);
+  consolewriteln (" devices to stop monitor cycle.");
+  while (--loopCount>0 && !devRestartable[dev2rescan]) delay (500);
+  if (strcmp (param[0], "rescan") == 0) {
+    if (loopCount == 0) {
+      consolewrite ("Wait timed out");
+      }
+    else {
+      consolewrite ("Rescanning ");
+      consolewriteln (param[1]);
+      if      (strcmp (param[1], "bh1750")   == 0) the_bh1750.begin();
+      else if (strcmp (param[1], "bme280")   == 0) the_bme280.begin();
+      else if (strcmp (param[1], "css811")   == 0) the_css811.begin();
+      else if (strcmp (param[1], "hdc1080")  == 0) the_hdc1080.begin();
+      else if (strcmp (param[1], "ina2xx")   == 0) the_ina2xx.begin();
+      else if (strcmp (param[1], "pfc8583")  == 0) the_pfc8583.begin();
+      else if (strcmp (param[1], "sdd1306")  == 0) the_sdd1306.begin();
+      else if (strcmp (param[1], "veml6075") == 0) the_veml6075.begin();
+      else consolewrite ("Unable to restart device");
+      }
+    }
+  }
+
+
+/*
  * Telnet configuration
  */
 void mt_telnet (int nparam, char **param)
@@ -2776,6 +3180,11 @@ void mt_set_wifi (int nparam, char **param)
       nvs_get_string (msgBuffer, outline, "none", sizeof(outline));
       consolewriteln (outline);      
       }
+    if (nvs_get_int ("wifi_ap", 1) == 1) {
+      nvs_get_string ("ap_name", outline, device_name, sizeof(outline));
+      consolewrite (" * wifiAP: ");
+      consolewriteln (outline);      
+      }
     return;
     }
   /*
@@ -2933,6 +3342,114 @@ void mt_set_dallas (int nparam, char **param)
   }
 }
 
+/*
+ * define transformations where appropriate
+ */
+void mt_transform (int nparam, char **param)
+{
+  char nvsName[SENSOR_NAME_LEN];
+  char rpnBuffer[BUFFSIZE];
+  int  cnt = 0;
+
+  if (nparam == 1) {
+    for (uint8_t dev=0; dev<numberOfTypes; dev++) {
+      for (uint8_t n=0; n<devTypeCount[dev]; n++) {
+        sprintf (nvsName, "%sXfm_%d", devType[dev], n);
+        nvs_get_string (nvsName, rpnBuffer, "disable", BUFFSIZE);
+        if (strcmp (rpnBuffer, "disable") != 0) {
+          sprintf (nvsName, "%s.%d: ", devType[dev], n);
+          consolewrite (nvsName);
+          consolewriteln (rpnBuffer);
+          cnt++;
+        }
+      }
+    }
+    if (cnt == 0) {
+      if (ansiTerm) displayAnsi(3);
+      consolewriteln ("No transformations defined.");
+    }
+  }
+  else if (nparam > 3) {
+    for (uint8_t dev=0; dev<numberOfTypes && cnt==0; dev++) if (strcmp (param[1], devType[dev]) == 0) cnt++;
+    if (cnt == 0) {
+      if (ansiTerm) displayAnsi(3);
+      consolewrite ("Unrecognised device type: ");
+      consolewriteln (param[1]);
+    }
+    else {
+      if (util_str_isa_int(param[2])) {
+        cnt = util_str2int (param[2]);
+        sprintf (nvsName, "%sXfm_%d", param[1], cnt);
+        strcpy (rpnBuffer, param[3]);
+        for (uint8_t n=4; n<nparam; n++) {
+          strcat (rpnBuffer, " ");
+          strcat (rpnBuffer, param[n]);
+        }
+        nvs_put_string (nvsName, rpnBuffer);
+      }
+      else {
+        if (ansiTerm) displayAnsi(3);
+        consolewriteln ("Device index should be numeric");
+      }
+    }
+  }
+  else {
+    if (ansiTerm) displayAnsi(3);
+    consolewriteln ("transform needs more parameters");
+  }
+}
+
+
+void mt_transformName (int nparam, char **param)
+{
+  char nvsName[SENSOR_NAME_LEN];
+  char rpnBuffer[BUFFSIZE];
+  int  cnt = 0;
+
+  if (nparam == 1) {
+    for (uint8_t dev=0; dev<numberOfTypes; dev++) {
+      for (uint8_t n=0; n<devTypeCount[dev]; n++) {
+        sprintf (nvsName, "%sAlt_%d", devType[dev], n);
+        nvs_get_string (nvsName, rpnBuffer, "disable", BUFFSIZE);
+        if (strcmp (rpnBuffer, "disable") != 0) {
+          sprintf (nvsName, "%s.%d: ", devType[dev], n);
+          consolewrite (nvsName);
+          consolewriteln (rpnBuffer);
+          cnt++;
+        }
+      }
+    }
+    if (cnt == 0) {
+      if (ansiTerm) displayAnsi(3);
+      consolewriteln ("No transformation names defined.");
+    }
+  }
+  else if (nparam == 4) {
+    for (uint8_t dev=0; dev<numberOfTypes && cnt==0; dev++) if (strcmp (param[1], devType[dev]) == 0) cnt++;
+    if (cnt == 0) {
+      if (ansiTerm) displayAnsi(3);
+      consolewrite ("Unrecognised device type: ");
+      consolewriteln (param[1]);
+    }
+    else {
+      if (util_str_isa_int(param[2])) {
+        cnt = util_str2int (param[2]);
+        sprintf (nvsName, "%sAlt_%d", param[1], cnt);
+        nvs_put_string (nvsName, param[3]);
+      }
+      else {
+        if (ansiTerm) displayAnsi(3);
+        consolewriteln ("Device index should be numeric");
+      }
+    }
+  }
+  else {
+    if (ansiTerm) displayAnsi(3);
+    consolewriteln ("transformname needs more parameters");
+  }
+}
+
+
 void mt_set_alert (int nparam, char **param)
 {
   uint8_t alMode = 0;
@@ -2959,11 +3476,13 @@ void mt_set_alert (int nparam, char **param)
         else if (strcmp (devType[devx], "bme280")   == 0) { subLimit = the_bme280.subtypeLen;   subDesc = &(the_bme280.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "css811")   == 0) { subLimit = the_css811.subtypeLen;   subDesc = &(the_css811.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "hdc1080")  == 0) { subLimit = the_hdc1080.subtypeLen;  subDesc = &(the_hdc1080.subtypeList[0][0]);  }
+        else if (strcmp (devType[devx], "pfc8583")  == 0) { subLimit = the_pfc8583.subtypeLen;  subDesc = &(the_pfc8583.subtypeList[0][0]);  }
         else if (strcmp (devType[devx], "ina2xx")   == 0) { subLimit = the_ina2xx.subtypeLen;   subDesc = &(the_ina2xx.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "counter")  == 0) { subLimit = theCounter.subtypeLen;   subDesc = &(theCounter.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "output")   == 0) { subLimit = the_output.subtypeLen;   subDesc = &(the_output.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "ds1820")   == 0) { subLimit = the_wire.subtypeLen;     subDesc = &(the_wire.subtypeList[0][0]);     }
         else if (strcmp (devType[devx], "serial")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_serial.subtypeList[0][0]);   }
+        else if (strcmp (devType[devx], "switch")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_switch.subtypeList[0][0]);   }
         else if (strcmp (devType[devx], "adc")      == 0) { subLimit = the_adc.subtypeLen;      subDesc = &(the_adc.subtypeList[0][0]);      start = 32 ; endpt = 40; }
       // }
       // format of name is first four letters of device type + variable name + warning/crit/extreme index + device number,
@@ -3002,11 +3521,13 @@ void mt_set_alert (int nparam, char **param)
           else if (strcmp (param[1], "bme280")   == 0) { subLimit = the_bme280.subtypeLen;   subDesc = &(the_bme280.subtypeList[0][0]);   }
           else if (strcmp (param[1], "css811")   == 0) { subLimit = the_css811.subtypeLen;   subDesc = &(the_css811.subtypeList[0][0]);   }
           else if (strcmp (param[1], "hdc1080")  == 0) { subLimit = the_hdc1080.subtypeLen;  subDesc = &(the_hdc1080.subtypeList[0][0]);  }
+          else if (strcmp (param[1], "pfc8583")  == 0) { subLimit = the_pfc8583.subtypeLen;  subDesc = &(the_pfc8583.subtypeList[0][0]);  }
           else if (strcmp (param[1], "ina2xx")   == 0) { subLimit = the_ina2xx.subtypeLen;   subDesc = &(the_ina2xx.subtypeList[0][0]);   }
           else if (strcmp (param[1], "counter")  == 0) { subLimit = theCounter.subtypeLen;   subDesc = &(theCounter.subtypeList[0][0]);   }
           else if (strcmp (param[1], "output")   == 0) { subLimit = the_output.subtypeLen;   subDesc = &(the_output.subtypeList[0][0]);   }
           else if (strcmp (param[1], "ds1820")   == 0) { subLimit = the_wire.subtypeLen;     subDesc = &(the_wire.subtypeList[0][0]);     }
           else if (strcmp (param[1], "serial")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_serial.subtypeList[0][0]);   }
+          else if (strcmp (param[1], "switch")   == 0) { subLimit = the_serial.subtypeLen;   subDesc = &(the_switch.subtypeList[0][0]);   }
           else if (strcmp (param[1], "adc")      == 0) { subLimit = the_adc.subtypeLen;      subDesc = &(the_adc.subtypeList[0][0]);      }
           for (char limit=0; limit<subLimit && isOK==0; limit++) {
             tPtr = subDesc + (limit * 5);
@@ -3057,84 +3578,129 @@ void mt_set_alert (int nparam, char **param)
 
 void mt_help(char *query)
 {
+  bool fullList = true;
+
+  if (query!=NULL && strcmp (query, "summary") == 0) {
+    query = NULL;
+    fullList = false;
+  }
   if (query==NULL || strcmp(query, "adc") == 0) {
     consolewriteln ((const char*) "adc [<pin> disable]");
     consolewriteln ((const char*) "adc [<pin> <unit-of-measure> <attenuation> <offset> <multiplier>]");
-    consolewriteln ((const char*) "    Configure adc (Analogue to Digital Conversion)");
-    consolewriteln ((const char*) "    NB: pin number must be in range 32-39");
-    consolewriteln ((const char*) "        attenuation range 0-3 sets FSD: 0=800mV, 1=1.1V, 2=1.35V, 3=2.6V");
-    consolewriteln ((const char*) "        voltages beyond those indicated may produce non-linear results");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure adc (Analogue to Digital Conversion)");
+      consolewriteln ((const char*) "    NB: pin number must be in range 32-39");
+      consolewriteln ((const char*) "        attenuation range 0-3 sets FSD: 0=800mV, 1=1.1V, 2=1.35V, 3=2.6V");
+      consolewriteln ((const char*) "        voltages beyond those indicated may produce non-linear results");
+    }
   }
   if (query==NULL || strcmp(query, "altitude") == 0) {
     consolewriteln ((const char*) "altitude [<altitude> [m|ft]]");
-    consolewriteln ((const char*) "    Set altitude of unit for pressure compensation");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set altitude of unit for pressure compensation");
+    }
+  }
+  if (query==NULL || strcmp(query, "ap") == 0) {
+    consolewriteln ((const char*) "ap [<ap_password> [<ap_name>]]");
+    consolewriteln ((const char*) "ap [ip <ap-address>]");
+    consolewriteln ((const char*) "ap [channel <1-14>]");
+    consolewriteln ((const char*) "ap [hidden <true|false>]");
+    consolewriteln ((const char*) "ap [connects [<1-13>]]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set access point password and name. Default name matches device name.");
+      consolewriteln ((const char*) "    Set access point IP address.");
+      consolewriteln ((const char*) "    Set access point WiFi channel.");
+      consolewriteln ((const char*) "    Set access point hidden status (broadcast of SSID)");
+      consolewriteln ((const char*) "    Set access point maximum number of connections.");
+    }
   }
   if (query==NULL || strcmp(query, "ansi") == 0) {
     consolewriteln ((const char*) "ansi [{bold|command|error|normal|time} <attribute-list>]");
     consolewriteln ((const char*) "ansi [test]");
-    consolewriteln ((const char*) "    Set colour attributes when ANSI colourisation is enabled");
-    consolewriteln ((const char*) "    Attribute-list is a semicolon separated list of the following:");
-    consolewriteln ((const char*) "    Attributes: support may vary between terminal types");
-    consolewriteln ((const char*) "        0 - reset       1 - bold      3 - italic     4 - underline");
-    consolewriteln ((const char*) "        5 - blink       7 - reverse video            9 - strikeout");
-    consolewriteln ((const char*) "    Colours: \"30 + number\" for text, \"40 + number\" for background");
-    consolewriteln ((const char*) "        0 - black       1 - red       2 - green      3 - yellow");
-    consolewriteln ((const char*) "        4 - purple      5 - purple    6 - cyan       7 - white");
-    consolewriteln ((const char*) "    \"test\" gives a preview of the colour combinations described above");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set colour attributes when ANSI colourisation is enabled");
+      consolewriteln ((const char*) "    Attribute-list is a semicolon separated list of the following:");
+      consolewriteln ((const char*) "    Attributes: support may vary between terminal types");
+      consolewriteln ((const char*) "        0 - reset       1 - bold      3 - italic     4 - underline");
+      consolewriteln ((const char*) "        5 - blink       7 - reverse video            9 - strikeout");
+      consolewriteln ((const char*) "    Colours: \"30 + number\" for text, \"40 + number\" for background");
+      consolewriteln ((const char*) "        0 - black       1 - red       2 - green      3 - yellow");
+      consolewriteln ((const char*) "        4 - purple      5 - purple    6 - cyan       7 - white");
+      consolewriteln ((const char*) "    \"test\" gives a preview of the colour combinations described above");
+    }
   }
 #ifdef USE_BLUETOOTH
   if (query==NULL || strcmp(query, "bluetooth") == 0) {
     consolewriteln ((const char*) "bluetooth [<pin>|none|disable]");
-    consolewriteln ((const char*) "    Enable with 4 digit pin or no pin or disable Bluetooth serial console");
+    if (fullList) {
+      consolewriteln ((const char*) "    Enable with 4 digit pin or no pin or disable Bluetooth serial console");
+    }
   }
 #endif
   if (query==NULL || strcmp(query, "cert") == 0) {
     consolewriteln ((const char*) "cert [{ota|xymon} <fileName>]");
-    consolewriteln ((const char*) "    Certificate file to use if using https for transfers");
+    if (fullList) {
+      consolewriteln ((const char*) "    Certificate file to use if using https for transfers");
+    }
   }
   if (query==NULL || strcmp(query, "clear") == 0) {
     consolewriteln ((const char*) "clear");
-    consolewriteln ((const char*) "    Clear terminal contents");
+    if (fullList) {
+      consolewriteln ((const char*) "    Clear terminal contents");
+    }
   }
   if (query==NULL || strcmp(query, "combine") == 0) {
     consolewriteln ((const char*) "combine [<unitName>]");
-    consolewriteln ((const char*) "    Combine graphs from this unit with <unitName>");
+    if (fullList) {
+      consolewriteln ((const char*) "    Combine graphs from this unit with <unitName>");
+    }
   }
   if (query==NULL || strcmp(query, "compensate") == 0) {
-    consolewriteln ((const char*) "compensate [css811 <n> [hdc1080|bme280] <i>]");
-    consolewriteln ((const char*) "    Apply temperature compensation to css811[n] from device[i]");
+    consolewriteln ((const char*) "compensate [{css811|pfc8583} <n> {hdc1080|bme280} <i>]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Apply temperature compensation to css811[n]/pfc8583[n] from device[i]");
+    }
   }
   if (query==NULL || strcmp(query, "config") == 0) {
     consolewriteln ((const char*) "config");
-    consolewriteln ((const char*) "    Display configuration");
+    if (fullList) {
+      consolewriteln ((const char*) "    Display basic configuration");
+    }
   }
   if (query==NULL || strcmp(query, "constant") == 0) {
     consolewriteln ((const char*) "constant [<0-9> <value> [<label]]");
-    consolewriteln ((const char*) "    define a constant against memory index and optionally label it.");
-    consolewriteln ((const char*) "    recall using rpn calculator with\"k\" operator, eg: \"rpn adc.var 7 k *\"");
-    consolewriteln ((const char*) "    The label may be up to 20 chars long, it is only displayed by \"constant\"");
+    if (fullList) {
+      consolewriteln ((const char*) "    define a constant against memory index and optionally label it.");
+      consolewriteln ((const char*) "    recall using rpn calculator with\"k\" operator, eg: \"rpn adc.var 7 k *\"");
+      consolewriteln ((const char*) "    The label may be up to 20 chars long, it is only displayed by \"constant\"");
+    }
   }
   if (query==NULL || strcmp(query, "counter") == 0) {
     consolewriteln ((const char*) "counter <0-7> disable");
     consolewriteln ((const char*) "counter <0-7> <0-39> <unique-name> <unit_of_measure> <offset> <multiplier>");
-    consolewriteln ((const char*) "    configure counter <0-3> on pin <0-39> with a unique name/identifier with a");
-    consolewriteln ((const char*) "    straight line conversion of <offset> and <multiplier> (default 0.0 and 1.0)");
+    if (fullList) {
+      consolewriteln ((const char*) "    configure counter <0-3> on pin <0-39> with a unique name/identifier with a");
+      consolewriteln ((const char*) "    straight line conversion of <offset> and <multiplier> (default 0.0 and 1.0)");
+    }
   }
   if (query==NULL || strcmp(query, "critical") == 0 || strcmp(query, "extreme") == 0 || strcmp(query, "warning") == 0) {
-    consolewriteln ((const char*) "critical|extreme|warning <devicetype> <0-n> <val> disable");
-    consolewriteln ((const char*) "critical|extreme|warning <devicetype> <0-n> <val> <rpn-expression>");
-    consolewriteln ((const char*) "    enable or disable alerting thresholds on sensors");
-    consolewriteln ((const char*) "    Use \"inventory\" to list devicetype, val follows first 4 letters of test");
-    consolewriteln ((const char*) "      adc:      adc");
-    consolewriteln ((const char*) "      bh1750:   lux");
-    consolewriteln ((const char*) "      bme280:   temp, humi, pres");
-    consolewriteln ((const char*) "      counter:  var");
-    consolewriteln ((const char*) "      css811:   co2, tvoc");
-    consolewriteln ((const char*) "      ds1820:   temp");
-    consolewriteln ((const char*) "      ina2xx:   amps, volt, watt");
-    consolewriteln ((const char*) "      veml6075: uv");
-    consolewriteln ((const char*) "      output:   outp");
-    consolewriteln ((const char*) "      serial:   var");
+    consolewriteln ((const char*) "{critical|extreme|warning} <devicetype> <0-n> <val> disable");
+    consolewriteln ((const char*) "{critical|extreme|warning} <devicetype> <0-n> <val> <rpn-expression>");
+    if (fullList) {
+      consolewriteln ((const char*) "    enable or disable alerting thresholds on sensors");
+      consolewriteln ((const char*) "    Use \"inventory\" to list devicetype, val follows first 4 letters of test");
+      consolewriteln ((const char*) "      adc:      adc");
+      consolewriteln ((const char*) "      bh1750:   lux");
+      consolewriteln ((const char*) "      bme280:   temp, humi, pres");
+      consolewriteln ((const char*) "      counter:  var");
+      consolewriteln ((const char*) "      css811:   co2, tvoc");
+      consolewriteln ((const char*) "      ds1820:   temp");
+      consolewriteln ((const char*) "      ina2xx:   amps, volt, watt");
+      consolewriteln ((const char*) "      output:   outp");
+      consolewriteln ((const char*) "      pfc8583:  var");
+      consolewriteln ((const char*) "      serial:   var");
+      consolewriteln ((const char*) "      veml6075: uv");
+    }
   }
   if (query==NULL || strcmp(query, "cpuspeed") == 0) {
     consolewrite   ((const char*) "cpuspeed [240|160|80");
@@ -3150,189 +3716,333 @@ void mt_help(char *query)
     }
 #endif
     consolewriteln ((const char*) "|0]");
-    consolewriteln ((const char*) "    Set CPU speed in MHz, try to use the lowest viable to save power consumption");
-    consolewriteln ((const char*) "    Use zero to use factory default speed");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set CPU speed in MHz, try to use the lowest viable to save power consumption");
+      consolewriteln ((const char*) "    Use zero to use factory default speed");
+    }
+  }
+  if (query==NULL || strcmp(query, "debug") == 0) {
+    consolewriteln ((const char*) "debug <0-3>");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set debug level, 0 = normal, 3 = most verbose");
+    }
   }
   if (query==NULL || strcmp(query, "del") == 0) {
     consolewriteln ((const char*) "del <filename>");
-    consolewriteln ((const char*) "    Delete a file");
+    if (fullList) {
+      consolewriteln ((const char*) "    Delete a file");
+    }
   }
   if (query==NULL || strcmp(query, "devicename") == 0) {
     consolewriteln ((const char*) "devicename [<device-name>]");
-    consolewriteln ((const char*) "    Set unique device name to identify this unit (16 char max length, avoid spaces)");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set unique device name to identify this unit (16 char max length, avoid spaces)");
+    }
     consolewriteln ((const char*) "devicename <devicetype> <0-n> <device-name>");
-    consolewriteln ((const char*) "    Name a sensor device, use \"inventory\" to list device types");
+    if (fullList) {
+      consolewriteln ((const char*) "    Name a sensor device, use \"inventory\" to list device types");
+    }
   }
   if (query==NULL || strcmp(query, "dewpoint") == 0) {
     consolewriteln ((const char*) "dewpoint [bme280|hdc1080] <0-n> <dewpointname|\"none\">");
-    consolewriteln ((const char*) "    Name a dew point for a temperature sensor, or use none to disable");
+    if (fullList) {
+      consolewriteln ((const char*) "    Name a dew point for a temperature sensor, or use none to disable");
+    }
   }
   if (query==NULL || strcmp(query, "dir") == 0) {
     consolewriteln ((const char*) "dir");
-    consolewriteln ((const char*) "    Directory listing of file system");
+    if (fullList) {
+      consolewriteln ((const char*) "    Directory listing of file system");
+    }
   }
   if (query==NULL || strcmp(query, "dump") == 0) {
     consolewriteln ((const char*) "dump <devicetype>");
-    consolewriteln ((const char*) "    Dump raw data held for a device type, use \"list devices\" to list types");
+    if (fullList) {
+      consolewriteln ((const char*) "    Dump raw data held for a device type, use \"list devices\" to list types");
+    }
   }
   if (query==NULL || strcmp(query, "enable") == 0 || strcmp(query, "disable") == 0) {
-    consolewriteln ((const char*) "[enable|disable] [ansi|consolelog|memory|otaonboot|showlogic|startupdelay|telnet]");
-    consolewriteln ((const char*) "    Enable or disable ANSI colourisation of console text");
-    consolewriteln ((const char*) "    Enable or disable logging of console input to /console.log");
-    consolewriteln ((const char*) "    Enable or disable display of memory settings");
-    consolewriteln ((const char*) "    Enable or disable check for over the air (ota) update on booting");
-    consolewriteln ((const char*) "    Enable or disable display of rpn logic for alerts");
-    consolewriteln ((const char*) "    Enable or disable 30 second delay on start");
-    consolewriteln ((const char*) "    Enable or disable telnet service");
+    consolewriteln ((const char*) "[enable|disable] [ansi|ap|consolelog|mdns|memory|otaonboot|showlogic|startupdelay|telnet]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Enable or disable ANSI colourisation of console text");
+      consolewriteln ((const char*) "    Enable or disable WiFi access point");
+      consolewriteln ((const char*) "    Enable or disable logging of console input to /console.log");
+      consolewriteln ((const char*) "    Enable or disable mDNS services");
+      consolewriteln ((const char*) "    Enable or disable display of memory settings");
+      consolewriteln ((const char*) "    Enable or disable check for over the air (ota) update on booting");
+      consolewriteln ((const char*) "    Enable or disable display of rpn logic for alerts");
+      consolewriteln ((const char*) "    Enable or disable 30 second delay on start");
+      consolewriteln ((const char*) "    Enable or disable telnet service");
+    }
   }
   if (query==NULL || strcmp(query, "erase") == 0) {
     consolewriteln ((const char*) "erase config");
-    consolewriteln ((const char*) "    Erase all configuration settings and restart");
+    if (fullList) {
+      consolewriteln ((const char*) "    Erase all configuration settings and restart");
+    }
+  }
+  if (query==NULL || strcmp(query, "frequency") == 0) {
+    consolewriteln ((const char*) "frequency [pfc8583 <n> <frequency>]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set reference frequency in Hz for time dependant measurement");
+      consolewriteln ((const char*) "    Use frequency of 1 for counter, and 0 for non-resetting counter");
+      consolewriteln ((const char*) "    eg if using 1MHz osc for distance measurement, frequency will be 1000000");
+    }
   }
   if (query==NULL || strcmp(query, "help") == 0) {
-    consolewriteln ((const char*) "help [<command>]");
-    consolewriteln ((const char*) "    Display list of command and brief description");
+    consolewriteln ((const char*) "help [<command>|\"summary\"]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Display list of command and brief description");
+    }
   }
   if (query==NULL || strcmp(query, "hibernate") == 0) {
     consolewriteln ((const char*) "hibernate <number> [mins|hours|days]");
-    consolewriteln ((const char*) "    Go to deep sleep from now for a period of time, default time measure is mins");
+    if (fullList) {
+      consolewriteln ((const char*) "    Go to deep sleep from now for a period of time, default time measure is mins");
+    }
     consolewriteln ((const char*) "hibernate [<start> <end>]");
-    consolewriteln ((const char*) "    Go to deep sleep daily between start and end times in hh:mm format");
-    consolewriteln ((const char*) "    disabled if start and end times match");
+    if (fullList) {
+      consolewriteln ((const char*) "    Go to deep sleep daily between start and end times in hh:mm format");
+      consolewriteln ((const char*) "    disabled if start and end times match");
+    }
   }
   if (query==NULL || strcmp(query, "history") == 0) {
     consolewriteln ((const char*) "history");
-    consolewriteln ((const char*) "    Display recent command line history");
+    if (fullList) {
+      consolewriteln ((const char*) "    Display recent command line history");
+    }
   }
   if (query==NULL || strcmp(query, "i2c") == 0) {
     consolewriteln ((const char*) "i2c [<0-1> <sda> <scl> [speed]]");
-    consolewriteln ((const char*) "    Set i2c pins, eg: 21 and 22 for bus-0, and 5 and 4 for bus-1");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set i2c pins, eg: 21 and 22 for bus-0, and 5 and 4 for bus-1");
+    }
   }
   if (query==NULL || strcmp(query, "identify") == 0) {
     consolewriteln ((const char*) "identify <pin> [invert]");
     consolewriteln ((const char*) "identify [on|off|flash|fflash|sflash] [persist]");
-    consolewriteln ((const char*) "    Configure ID LED pin, on, off or flash with fast and slow options");
-    consolewriteln ((const char*) "    Define state. Without \"persist\" state is cleared on restart");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure ID LED pin, on, off or flash with fast and slow options");
+      consolewriteln ((const char*) "    Define state. Without \"persist\" state is cleared on restart");
+    }
   }
   if (query==NULL || strcmp(query, "interval") == 0) {
     consolewriteln ((const char*) "interval [<devicetype> <seconds>]");
-    consolewriteln ((const char*) "    Define time interval between each measurement(1-300 seconds)");
+    if (fullList) {
+      consolewriteln ((const char*) "    Define time interval between each measurement(1-300 seconds)");
+    }
   }
   if (query==NULL || strcmp(query, "inventory") == 0) {
-    consolewriteln ((const char*) "inventory");
-    consolewriteln ((const char*) "    Show inventory of connected/configured devices");
+    consolewriteln ((const char*) "inventory [standard|full|ext|extended]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Show inventory of connected/configured devices, default is \"standard\"");
+    }
   }
   if (query==NULL || strcmp(query, "list") == 0 || strcmp(query, "show") == 0) {
     consolewriteln ((const char*) "list|show [devices|tz|vars]");
-    consolewriteln ((const char*) "    List supported device types, timezone names or sensor variables");
+    if (fullList) {
+      consolewriteln ((const char*) "    List supported device types, timezone names or sensor variables");
+    }
+  }
+  if (query==NULL || strcmp(query, "mdns") == 0) {
+    consolewriteln ((const char*) "mdns <service> [tcp|udp]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Search for a mdns service, defaults to TCP protocol");
+    }
   }
   if (query==NULL || strcmp(query, "ntp") == 0) {
     consolewriteln ((const char*) "ntp [<server-name>|none]");
-    consolewriteln ((const char*) "    Set network time protocol (NTP) server to source time signal");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set network time protocol (NTP) server to source time signal");
+    }
   }
   if (query==NULL || strcmp(query, "onewire") == 0) {
     consolewriteln ((const char*) "onewire <bus-number> [disable|<pin>]");
-    consolewriteln ((const char*) "    Configure Dallas OneWire devices");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure Dallas OneWire devices");
+    }
   }
   if (query==NULL || strcmp(query, "opacity") == 0) {
     consolewriteln ((const char*) "opacity [bh1750 <number> <factor>]");
-    consolewriteln ((const char*) "    Set the opacity of light sensor cover, uncovered sensor is typically 1.2");
-    consolewriteln ((const char*) "    Permissable factor range is 0.5 - 1.5");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set the opacity of light sensor cover, uncovered sensor is typically 1.2");
+      consolewriteln ((const char*) "    Permissable factor range is 0.5 - 1.5");
+    }
   }
   if (query==NULL || strcmp(query, "ota") == 0) {
     consolewriteln ((const char*) "ota [update|revert|<url>]");
-    consolewriteln ((const char*) "    Check and apply over the air update");
-    consolewriteln ((const char*) "    Revert to previous installation.");
-    consolewriteln ((const char*) "    Set base URL for OTA metadata and image");
+    if (fullList) {
+      consolewriteln ((const char*) "    Check and apply over the air update");
+      consolewriteln ((const char*) "    Revert to previous installation.");
+      consolewriteln ((const char*) "    Set base URL for OTA metadata and image");
+    }
   }
   if (query==NULL || strcmp(query, "output") == 0) {
     consolewriteln ((const char*) "output [<index> disable]");
     consolewriteln ((const char*) "output [<index> default <value>]");
     consolewriteln ((const char*) "output [<index> <pin> <relay|pwm|servo|var> <name> <rpn expression>]");
-    consolewriteln ((const char*) "    Configure output pins");
+    if (fullList) {
+      consolewriteln ((const char*) "    Configure output pins");
+    }
+  }
+  if (query==NULL || strcmp(query, "outputwait") == 0) {
+    consolewriteln ((const char*) "outputwait [<seconds>]");
+    if (fullList) {
+      consolewriteln ((const char*) "    After restarting leave outputs at default vaule for this number of seconds.");
+      consolewriteln ((const char*) "    Then start calculating output status based on RPN result value.");
+    }
   }
   if (query==NULL || strcmp(query, "password") == 0) {
     consolewriteln ((const char*) "password [<password>|none]");
+    if (fullList) {
 #ifdef USE_BLUETOOTH
-    consolewriteln ((const char*) "    Set password for Bluetooth-Serial/Telnet connections");
+      consolewriteln ((const char*) "    Set password for Bluetooth-Serial/Telnet connections");
 #else
-    consolewriteln ((const char*) "    Set password for Telnet connections");
+      consolewriteln ((const char*) "    Set password for Telnet connections");
 #endif
+    }
   }
   if (query==NULL || strcmp(query, "qnh") == 0) {
     consolewriteln ((const char*) "qnh");
-    consolewriteln ((const char*) "    set altitude based on normalised pressure (QNH)");
+    if (fullList) {
+      consolewriteln ((const char*) "    set altitude based on normalised pressure (QNH)");
+    }
   }
   if (query==NULL || strcmp(query, "quit") == 0) {
     consolewriteln ((const char*) "quit [number]");
-    consolewriteln ((const char*) "    Quit from telnet session, or cause a specific telnet ID to quit");
+    if (fullList) {
+      consolewriteln ((const char*) "    Quit from telnet session, or cause a specific telnet ID to quit");
+    }
   }
   if (query==NULL || strcmp(query, "read") == 0) {
     consolewriteln ((const char*) "read <filename>");
-    consolewriteln ((const char*) "    Read the contents of the file");
+    if (fullList) {
+      consolewriteln ((const char*) "    Read the contents of the file");
+    }
   }
   if (query==NULL || strcmp(query, "repeat") == 0) {
     consolewriteln ((const char*) "repeat [count [interval]]");
-    consolewriteln ((const char*) "    Repeat the previous command count times at interval seconds");
-    consolewriteln ((const char*) "    Default count and interval are 1 if not specified");
+    if (fullList) {
+      consolewriteln ((const char*) "    Repeat the previous command count times at interval seconds");
+      consolewriteln ((const char*) "    Default count and interval are 1 if not specified");
+    }
+  }
+  if (query==NULL || strcmp(query, "rescan") == 0 ||  strcmp(query, "remove") == 0) {
+    consolewriteln ((const char*) "rescan <device-type>");
+    consolewriteln ((const char*) "remove <device-type>");
+    if (fullList) {
+      consolewriteln ((const char*) "    Rescan i2c busses for added or removed devices of specified type.");
+      consolewriteln ((const char*) "    NB: Removal does not persist after reboot.");
+    }
   }
   if (query==NULL || strcmp(query, "resistor") == 0) {
     consolewriteln ((const char*) "resistor [ina2xx <index> <milliohm>]");
-    consolewriteln ((const char*) "    Set resistance of shunt resistor for voltage measurement");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set resistance of shunt resistor for voltage measurement");
+    }
   }
   if (query==NULL || strcmp(query, "restart") == 0) {
     consolewriteln ((const char*) "restart");
-    consolewriteln ((const char*) "    Restart system, this is required if configuration changes have been made");
+    if (fullList) {
+      consolewriteln ((const char*) "    Restart system, this is required if configuration changes have been made");
+    }
   }
   if (query==NULL || strcmp(query, "rpn") == 0) {
     consolewriteln ((const char*) "rpn <expression>");
-    consolewriteln ((const char*) "    Evalute rpn expression and show stack evaluation");
+    if (fullList) {
+      consolewriteln ((const char*) "    Evalute rpn expression and show stack evaluation");
+    }
   }
   if (query==NULL || strcmp(query, "serial") == 0) {
     consolewriteln ((const char*) "serial [0|1] <rx-pin> <tx-pin> <speed> <bits>");
     consolewriteln ((const char*) "serial [0|1] [disable|pms5003|zh03b|mh-z19c|winsen|ascii|nmea]");
-    consolewriteln ((const char*) "    Set up serial port's I/O pins, speed and device type configuration");
-    consolewriteln ((const char*) "    Winsen devices include: ze27-03, zp07/08-ch20, zc05/zp14-ch4, ze15/ze16b-co, zph01/02-pm2.5");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set up serial port's I/O pins, speed and device type configuration");
+      consolewriteln ((const char*) "    Winsen devices include: ze27-03, zp07/08-ch20, zc05/zp14-ch4, ze15/ze16b-co, zph01/02-pm2.5");
+    }
   }
   if (query==NULL || strcmp(query, "scan") == 0) {
     consolewriteln ((const char*) "scan");
-    consolewriteln ((const char*) "    Scan device busses for attached devices");
+    if (fullList) {
+      consolewriteln ((const char*) "    Scan device busses for attached devices");
+    }
+  }
+  if (query==NULL || strcmp(query, "switch") == 0) {
+    consolewriteln ((const char*) "switch [<index> [<pin>|disable]]");
+    if (fullList) {
+      consolewriteln ((const char*) "    Assign a switch to an I/O pin, or disable a switch");
+    }
   }
   if (query==NULL || strcmp(query, "terminate") == 0) {
     consolewriteln ((const char*) "terminate [now|<minutes>]");
-    consolewriteln ((const char*) "    Terminate command mode after n minutes from start, or now");
-    consolewriteln ((const char*) "    0 means do not terminate, otherwise must be between 1 and 60 minutes");
+    if (fullList) {
+      consolewriteln ((const char*) "    Terminate command mode after n minutes from start, or now");
+      consolewriteln ((const char*) "    0 means do not terminate, otherwise must be between 1 and 60 minutes");
+    }
   }
   if (query==NULL || strcmp(query, "timezone") == 0) {
     consolewriteln ((const char*) "timezone [defn]");
-    consolewriteln ((const char*) "    Set timezone, may be set using full TZ string or short cut");
-    consolewriteln ((const char*) "      use \"list tz\" for short-cuts, or enter time specification, eg");
-    consolewriteln ((const char*) "      UTC-03:00  for East African Time");
+    if (fullList) {
+      consolewriteln ((const char*) "    Set timezone, may be set using full TZ string or short cut");
+      consolewriteln ((const char*) "      use \"list tz\" for short-cuts, or enter time specification, eg");
+      consolewriteln ((const char*) "      UTC-03:00  for East African Time");
+    }
+  }
+  if (query==NULL || strcmp(query, "transform") == 0) {
+    consolewriteln ((const char*) "transform [<dev_type> <n> <rpn-formula>");
+    if (fullList) {
+      consolewriteln ((const char*) "    The transform formula is applied to the \"xfrm\" variable each measurement interval");
+    }
+  }
+  if (query==NULL || strcmp(query, "transform") == 0) {
+    consolewriteln ((const char*) "transformname [<dev_type> <n> <name>");
+    if (fullList) {
+      consolewriteln ((const char*) "    Apply the name to a transformation");
+    }
+  }
+  if (query==NULL || strcmp(query, "trigger") == 0) {
+    consolewriteln ((const char*) "trigger [pfc8583 <n> <pin>");
+    if (fullList) {
+      consolewriteln ((const char*) "    Use the specified pin to generate a short trigger pulse at the start of pfc8583 measurement");
+      consolewriteln ((const char*) "    Typically used for start of ultra-sonic measurements");
+    }
   }
   if (query==NULL || strcmp(query, "wifi") == 0 || strcmp(query, "wifi*") == 0) {
     consolewriteln ((const char*) "wifi [<number> <ssid> [<password>]]");
-    consolewriteln ((const char*) "    configure wifi 0-3 with ssid and optional password");
+    if (fullList) {
+      consolewriteln ((const char*) "    configure wifi 0-3 with ssid and optional password");
+    }
   }
   if (query==NULL || strcmp(query, "wifimode") == 0 || strcmp(query, "wifi*") == 0) {
     consolewriteln ((const char*) "wifimode [alwayson|ondemand]");
-    consolewriteln ((const char*) "    set wifi to be \"always on\" or on connect \"on demand\"");
+    if (fullList) {
+      consolewriteln ((const char*) "    set wifi to be \"always on\" or on connect \"on demand\"");
+    }
   }
   if (query==NULL || strcmp(query, "wifiscan") == 0 || strcmp(query, "wifi*") == 0) {
     consolewriteln ((const char*) "wifiscan [enable|disable]");
-    consolewriteln ((const char*) "    set wifi to scan for non-hidden ssids and use strongest signal");
-    consolewriteln ((const char*) "    NB: the network used must be predefined by \"wifi\", or it will be ignored");
+    if (fullList) {
+      consolewriteln ((const char*) "    set wifi to scan for non-hidden ssids and use strongest signal");
+      consolewriteln ((const char*) "    NB: the network used must be predefined by \"wifi\", or it will be ignored");
+    }
   }
   if (query==NULL || strcmp(query, "write") == 0) {
     consolewriteln ((const char*) "write <filename>");
-    consolewriteln ((const char*) "    Write the contents of the file");
+    if (fullList) {
+      consolewriteln ((const char*) "    Write the contents of the file");
+    }
   }
   if (query==NULL || strcmp(query, "xysecret") == 0) {
     consolewriteln ((const char*) "xysecret [<string>|none]");
-    consolewriteln ((const char*) "    Define a \"xysecret\" field to send when using http/s to xymon server.");
+    if (fullList) {
+      consolewriteln ((const char*) "    Define a \"xysecret\" field to send when using http/s to xymon server.");
+    }
   }
   if (query==NULL || strcmp(query, "xyserver") == 0) {
     consolewriteln ((const char*) "xyserver [<DNS-name>|<IP-Address>|<URL>|none [port-number]]");
-    consolewriteln ((const char*) "    Define the xymon server and port. Port 1984 used if not explicitly defined");
-    consolewriteln ((const char*) "    If using a URL, the port number is ignored.");
+    if (fullList) {
+      consolewriteln ((const char*) "    Define the xymon server and port. Port 1984 used if not explicitly defined");
+      consolewriteln ((const char*) "    If using a URL, the port number is ignored.");
+    }
   }
 }
