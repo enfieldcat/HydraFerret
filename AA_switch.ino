@@ -171,11 +171,11 @@ SOFTWARE.
       char devStatus[9];
       struct switch_s *myData;
 
-      consolewriteln ((const char*) "Test: switch - digital input");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No switches found.");
+        // consolewriteln ((const char*) " * No switches found.");
         return;
       }
+      consolewriteln ((const char*) "Test: switch - digital input");
       myData = (struct switch_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         sprintf (msgBuffer, " * OK %s.%d, name: %s, pin %d", myDevType, device, myData[device].uniquename, myData[device].pinNumber);

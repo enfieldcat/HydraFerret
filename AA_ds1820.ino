@@ -424,24 +424,26 @@ class oneWireTemperature {
       //
       // Now present findings, expect this data to be constant, so exclusive semaphore not required.
       //
-      if (devTypeCount[myDevTypeID] > 0) consolewriteln ("OneWire temperature sensors:");
-      else consolewriteln ("No OneWire sensors found");
-      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
-        sprintf (msgBuffer, " * ID: %02d, UID ", myData[n].index);
-        consolewrite (msgBuffer);
-        for (uint8_t k=0; k<8; k++) {
-          sprintf (msgBuffer, "%02x", myData[n].address[k]);
+      if (devTypeCount[myDevTypeID] > 0) {
+        consolewriteln ("OneWire temperature sensors:");
+        // else consolewriteln ("No OneWire sensors found");
+        for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+          sprintf (msgBuffer, " * ID: %02d, UID ", myData[n].index);
           consolewrite (msgBuffer);
-        }
-        sprintf (msgBuffer, ", Name: %s, Type: ", myData[n].uniquename);
-        consolewrite (msgBuffer);
-        switch (myData[n].address[0]) {
-          case DS18S20MODEL:  consolewriteln ("DS18S20/DS1820"); break;
-          case DS18B20MODEL:  consolewriteln ("DS18B20/MAX31820"); break;
-          case DS1822MODEL:   consolewriteln ("DS1822"); break;
-          case DS1825MODEL:   consolewriteln ("DS1825"); break;
-          case DS28EA00MODEL: consolewriteln ("DS28EA00"); break;
-          default:            consolewriteln ("unknown (invalid)"); break;
+          for (uint8_t k=0; k<8; k++) {
+            sprintf (msgBuffer, "%02x", myData[n].address[k]);
+            consolewrite (msgBuffer);
+          }
+          sprintf (msgBuffer, ", Name: %s, Type: ", myData[n].uniquename);
+          consolewrite (msgBuffer);
+          switch (myData[n].address[0]) {
+            case DS18S20MODEL:  consolewriteln ("DS18S20/DS1820"); break;
+            case DS18B20MODEL:  consolewriteln ("DS18B20/MAX31820"); break;
+            case DS1822MODEL:   consolewriteln ("DS1822"); break;
+            case DS1825MODEL:   consolewriteln ("DS1825"); break;
+            case DS28EA00MODEL: consolewriteln ("DS28EA00"); break;
+            default:            consolewriteln ("unknown (invalid)"); break;
+          }
         }
       }
     }

@@ -196,6 +196,40 @@ class rpn {
     return 1;
   }
 
+  /*
+   * Get a constant k
+   */
+  float getConstant(float index)
+  {
+    uint8_t idx;
+    float retval;
+    char msgBuffer[17];
+
+    idx = floor(index);
+    sprintf (msgBuffer, "const_val_%d", idx);
+    retval = nvs_get_float (msgBuffer, 0.00);
+    return (retval);
+  }
+
+  /*
+   * Display the stack to a max depth of 10 items
+   */
+  void doShowStack (char op)
+  {
+    uint8_t tPtr = 0;
+    char msgBuffer[20];
+
+    sprintf (msgBuffer, " %c ", op);
+    consolewrite (msgBuffer);
+    for (tPtr=0; tPtr<stackPtr; tPtr++) {
+      sprintf (msgBuffer, " %9s", util_ftos(lifoStack[tPtr], 4));
+      consolewrite (msgBuffer);
+    }
+    consolewriteln ("");
+  }
+
+public:
+
   float getvar (char* varname)
   {
     float retval = 0.00;
@@ -247,11 +281,13 @@ class rpn {
             else if (strcmp(varDevType, "counter")  == 0) retval = theCounter.getData   (lim, varDevAttrib);
             else if (strcmp(varDevType, "css811")   == 0) retval = the_css811.getData   (lim, varDevAttrib);
             else if (strcmp(varDevType, "hdc1080")  == 0) retval = the_hdc1080.getData  (lim, varDevAttrib);
+            else if (strcmp(varDevType, "pfc8583")  == 0) retval = the_pfc8583.getData  (lim, varDevAttrib);
             else if (strcmp(varDevType, "veml6075") == 0) retval = the_veml6075.getData (lim, varDevAttrib);
             else if (strcmp(varDevType, "ina2xx")   == 0) retval = the_ina2xx.getData   (lim, varDevAttrib);
             else if (strcmp(varDevType, "output")   == 0) retval = the_output.getData   (lim, varDevAttrib);
             else if (strcmp(varDevType, "serial")   == 0) retval = the_serial.getData   (lim, varDevAttrib);
             else if (strcmp(varDevType, "adc")      == 0) retval = the_adc.getData      (lim, varDevAttrib);
+            else if (strcmp(varDevType, "pfc8583")  == 0) retval = the_pfc8583.getData  (lim, varDevAttrib);
             else if (strcmp(varDevType, "memory")   == 0) {
               if      (strcmp (varDevAttrib, "free") == 0) retval = ESP.getFreeHeap();
               else if (strcmp (varDevAttrib, "minf") == 0) retval = ESP.getMinFreeHeap();
@@ -283,40 +319,7 @@ class rpn {
     return (retval);
   }
 
-  /*
-   * Get a constant k
-   */
-  float getConstant(float index)
-  {
-    uint8_t idx;
-    float retval;
-    char msgBuffer[17];
-
-    idx = floor(index);
-    sprintf (msgBuffer, "const_val_%d", idx);
-    retval = nvs_get_float (msgBuffer, 0.00);
-    return (retval);
-  }
-
-  /*
-   * Display the stack to a max depth of 10 items
-   */
-  void doShowStack (char op)
-  {
-    uint8_t tPtr = 0;
-    char msgBuffer[20];
-
-    sprintf (msgBuffer, " %c ", op);
-    consolewrite (msgBuffer);
-    for (tPtr=0; tPtr<stackPtr; tPtr++) {
-      sprintf (msgBuffer, " %9s", util_ftos(lifoStack[tPtr], 4));
-      consolewrite (msgBuffer);
-    }
-    consolewriteln ("");          
-  }
-
-  public:
-    float calc( int argc, char** argv )
+  float calc( int argc, char** argv )
     {
       int   i;
       float temp;

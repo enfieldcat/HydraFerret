@@ -61,7 +61,7 @@ void monitorCycle (void *pvParameters)
   util_start_devices();
   if (ansiTerm) displayAnsi (4);
   consolewriteln ("Scanning for supported devices complete");
-  consolewriteln ("Pause before starting monitoring cycle");
+  // consolewriteln ("Pause before starting monitoring cycle");
   if (ansiTerm) displayAnsi (0);
   delay (2500);
   if (ansiTerm) displayAnsi (4);
@@ -84,6 +84,7 @@ void monitorCycle (void *pvParameters)
       if (xQueueReceive(monitorQueue, &queueData, pdMS_TO_TICKS(MONITOR_INTERVAL + 5000)) != pdPASS) {
         consolewriteln ("Missing monitor cycle timing interrupt");
       }
+      if (debugLevel < 1) consolewriteln ("Monitor: Update cycle starts");
       /*
        * Check if alerts are to include rpn logic when triggered
        */
@@ -143,23 +144,26 @@ void monitorCycle (void *pvParameters)
                     if (metric == UV                                               && strcmp (devType[reportDev], "veml6075") == 0) {
                       tStatusIndex = the_veml6075.getStatusColor();
                     }
-                    else if (metric == LUX                                         && strcmp (devType[reportDev], "bh1750") == 0) {
+                    else if (metric == LUX                                         && strcmp (devType[reportDev], "bh1750")   == 0) {
                       tStatusIndex = the_bh1750.getStatusColor(); 
                     }
-                    else if ((metric == TEMP || metric == HUMID || metric == PRES) && strcmp (devType[reportDev], "bme280") == 0) {
+                    else if ((metric == TEMP || metric == HUMID || metric == PRES) && strcmp (devType[reportDev], "bme280")   == 0) {
                       tStatusIndex = the_bme280.getStatusColor(metric);
                     }
-                    else if ((metric == TEMP || metric == HUMID)                   && strcmp (devType[reportDev], "hdc1080") == 0) {
+                    else if ((metric == TEMP || metric == HUMID)                   && strcmp (devType[reportDev], "hdc1080")  == 0) {
                       tStatusIndex = the_hdc1080.getStatusColor(metric);
                     }
-                    else if ((metric == CO2 || metric == TVOC)                     && strcmp (devType[reportDev], "css811") == 0) {
+                    else if ((metric == CO2 || metric == TVOC)                     && strcmp (devType[reportDev], "css811")   == 0) {
                       tStatusIndex = the_css811.getStatusColor(metric);
                     }
                     else if ((metric == VOLT || metric == AMP || metric == WATT)   && strcmp (devType[reportDev], "ina2xx")   == 0) {
                       tStatusIndex = the_ina2xx.getStatusColor(metric);
                     }
-                    else if ((metric == TEMP)                                      && strcmp (devType[reportDev], "ds1820") == 0) {
+                    else if ((metric == TEMP)                                      && strcmp (devType[reportDev], "ds1820")   == 0) {
                       tStatusIndex = the_wire.getStatusColor();
+                    }
+                    else if ((metric == DIST || metric == COUN)                    && strcmp (devType[reportDev], "pfc8583")  == 0) {
+                      tStatusIndex = the_pfc8583.getStatusColor(metric);
                     }
                     if (tStatusIndex > statusIndex) statusIndex = tStatusIndex;
                   }
@@ -176,6 +180,7 @@ void monitorCycle (void *pvParameters)
                     else if ((metric==CO2  || metric==TVOC)                && strcmp (devType[reportDev], "css811")   == 0) the_css811.getXymonStatus (xydata, metric);
                     else if ((metric==VOLT || metric==AMP || metric==WATT) && strcmp (devType[reportDev], "ina2xx")   == 0) the_ina2xx.getXymonStatus (xydata, metric);
                     else if ( metric==TEMP                                 && strcmp (devType[reportDev], "ds1820")   == 0) the_wire.getXymonStatus (xydata);
+                    else if ((metric == DIST || metric == COUN)            && strcmp (devType[reportDev], "pfc8583")  == 0) the_pfc8583.getXymonStatus (xydata, metric);
                   }
                 }
                 // Custom footer for UV measurement
@@ -213,6 +218,10 @@ void monitorCycle (void *pvParameters)
                 else if (strcmp (devType[reportDev], "serial")   == 0) the_serial.getXymonStats(xydata);
                 else if (strcmp (devType[reportDev], "switch")   == 0) the_switch.getXymonStats(xydata);
                 else if (strcmp (devType[reportDev], "adc")      == 0) the_adc.getXymonStats(xydata);
+                else if (strcmp (devType[reportDev], "pfc8583")  == 0) {
+                  if (metricCount[DIST]>0) the_pfc8583.getXymonStats(xydata, DIST);
+                  if (metricCount[COUN]>0) the_pfc8583.getXymonStats(xydata, COUN);
+                }
                 else if (showOutput && strcmp (devType[reportDev], "output") == 0) the_output.getXymonStats(xydata);
               }
             }
@@ -240,9 +249,9 @@ void monitorCycle (void *pvParameters)
 void buildMemoryPacket(char* xydata)
 {
   int64_t uptime;
+  uint32_t heapSize, freeHeap, minFree, percFree;
   int days, hours, mins;
   char msgBuffer[80];
-  uint32_t heapSize, freeHeap, minFree, percFree;
 
   heapSize = ESP.getHeapSize();
   freeHeap = ESP.getFreeHeap();
@@ -266,6 +275,14 @@ void buildMemoryPacket(char* xydata)
   if (telnetRunning) strcat (xydata, "en");
   else strcat (xydata, "dis");
   strcat  (xydata, "abled)\n");
+  if (nvs_get_int ("wifi_ap", 1) == 1) {
+    char ssidName[33];
+    nvs_get_string ("ap_name", ssidName, device_name, sizeof(ssidName));
+    sprintf (msgBuffer, "&yellow %-16s %17s\n", "Access Pt SSID", ssidName);
+    strcat  (xydata, msgBuffer);
+    sprintf (msgBuffer, "&yellow %-16s %17s\n", "Access Pt IP", net_ip2str((uint32_t) WiFi.softAPIP()));
+    strcat  (xydata, msgBuffer);
+  }
   sprintf (msgBuffer, "&clear %-16s %17d\n", "Heap Size", heapSize);
   strcat  (xydata, msgBuffer);
   if (percFree >= 95) strcat (xydata, "&red ");
@@ -292,21 +309,6 @@ void buildMemoryPacket(char* xydata)
 void sendPacket (char* xydata)
 {
   sendPacket (NULL, xydata);
-/*
-  WiFiClient client;
-  char xyserver[80];
-  int xyport;
-
-  nvs_get_string ("xyserver", xyserver, "", sizeof(xyserver));
-  if (strlen(xyserver) > 0 && strcmp(xyserver, "none") != 0) {
-    xyport = nvs_get_int ("xyport", 1984);
-    if (client.connect (xyserver, xyport)) {
-      client.print (xydata);
-      client.flush();
-      client.stop();
-    }
-  }
-*/
 }
 
 void sendPacket (char* header, char* xydata)
@@ -407,22 +409,11 @@ void sendPacket (char* header, char* xydata)
   }
 }
 
-/* void deviceCollector (char* xydata)
-{
-  char msgBuffer[80];
-  
-  sprintf (xydata, "client %s %s\n", device_name, PROJECT_NAME);
-  sprintf (msgBuffer, "[date]\n%s\n", util_gettime());
-  strcat  (xydata, msgBuffer);
-  sprintf (msgBuffer, "[uname]\n%s %s %s esp32-%d_%dMHz\n", PROJECT_NAME, device_name, VERSION, ESP.getChipRevision(), ESP.getCpuFreqMHz());
-  strcat  (xydata, msgBuffer);
-  sprintf (msgBuffer, "[clientversion]\n%s %s (Compile date: %s $s)\n", PROJECT_NAME, VERSION, __DATE__, __TIME__);
-  strcat  (xydata, msgBuffer);
-} */
 
 void endMonitorHttp ()
 {
 if (monitorHttp != NULL) {
+  if (debugLevel > 1) consolewriteln ("Send monitor data via http");
   monitorHttp->end();
   monitorHttp->~HTTPClient();
   free (monitorHttp);

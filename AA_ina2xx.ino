@@ -33,6 +33,7 @@ class ina2xx {
     {
       struct ina2xx_s *myData;
       float volts, amps;
+      float xfrmResult;
       int pollInterval;
       int updateCount, loopCount; // UpdateCount = number of loop cycles per interval, loopCount = count of updates we attempted
       int16_t intVolt;
@@ -47,6 +48,7 @@ class ina2xx {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("ina2xx");
       if (myDevTypeID!=255) {
+        devRestartable[myDevTypeID] = false;
         util_deviceTimerCreate(myDevTypeID);
         myData = (struct ina2xx_s*) (devData[myDevTypeID]);
         sprintf (msgBuffer, "defaultPoll_%d", myDevTypeID);
@@ -107,7 +109,7 @@ class ina2xx {
           updateCount = 300;
           }
         // loop forever collecting data
-        while (true) {
+        while (devTypeCount[myDevTypeID]>0) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
             if (ansiTerm) displayAnsi(3);
             consolewriteln ("Missing ina2xx signal");
@@ -169,11 +171,28 @@ class ina2xx {
             }
             xSemaphoreGive(devTypeSem[myDevTypeID]);
           }
+          if (loopCount == 0) {
+            for (uint8_t device=0; device<devTypeCount[myDevTypeID]; device++) {
+              struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+              if (xfrm_Ptr != NULL) {
+                xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
+                  myData[device].transform = xfrmResult;
+                  xSemaphoreGive(devTypeSem[myDevTypeID]);
+                }
+              }
+            }
+          }
         }
       }
-      if (ansiTerm) displayAnsi(3);
-      consolewriteln ("Could not determine ina2xx type ID for update loop");
-      if (ansiTerm) displayAnsi(1);
+      if (myDevTypeID!=255) {
+        util_deallocate (myDevTypeID);
+      }
+      else {
+        if (ansiTerm) displayAnsi(3);
+        consolewriteln ("Could not determine ina2xx type ID for update loop");
+        if (ansiTerm) displayAnsi(1);
+      }
       vTaskDelete( NULL );
     }
 
@@ -217,7 +236,7 @@ class ina2xx {
         }
       }
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) "No ina2xx sensors found.");
+        // consolewriteln ((const char*) "No ina2xx sensors found.");
         return(false);  // nothing found!
       }
       // set up and inittialise structures
@@ -226,10 +245,11 @@ class ina2xx {
       devNr = 0;
       for (uint8_t bus=0; bus<2 && devNr<devTypeCount[myDevTypeID]; bus++) if (I2C_enabled[bus]) {
         for (uint8_t device=0x40 && devNr<devTypeCount[myDevTypeID]; device <= 0x4f; device++) {
+          myData[devNr].bus = bus;
+          myData[devNr].addr = device;
+          myData[devNr].isvalid = false;
+          myData[devNr].transform = 0.00;
           if (util_i2c_probe(bus, device)) {
-            myData[devNr].bus = bus;
-            myData[devNr].addr = device;
-            myData[devNr].isvalid = false;
             for (uint8_t supportedModel = 0; supportedModel<sizeof(inaSigAddr) && !myData[devNr].isvalid; supportedModel++) {
               if (inaMaxAddr[supportedModel]>=device) {
                 util_i2c_command (bus, device, (uint8_t) inaSigAddr[supportedModel]);
@@ -259,10 +279,21 @@ class ina2xx {
                     myData[devNr].watt_accum   = 0.0;
                     myData[devNr].watt_average = 0.0;
                     myData[devNr].watt_last    = 0.0;
+                    myData[devNr].transform    = 0.0;
                     myData[devNr].readingCount = 0;
                     myData[devNr].averagedOver = 0;
                     myData[devNr].channel      = channel;
                     myData[devNr].isvalid = true;
+                    //
+                    // get rpn transform
+                    //
+                    sprintf (msgBuffer, "ina2xxXfm_%d", devNr);  // Transformation Logic
+                    util_getLogic (msgBuffer, &myData[devNr].xfrmLogic);
+                    sprintf (msgBuffer, "ina2xxAlt_%d", devNr);  // Transformation Name
+                    nvs_get_string (msgBuffer, myData[devNr].xfrmName, "transform", sizeof (myData[devNr].xfrmName));
+                    //
+                    // Process rules
+                    //
                     for (uint8_t sense=0; sense<subtypeLen; sense++) {
                       myData[devNr].state[sense] = GREEN;
                       for (uint8_t level=0; level<3 ; level++) {
@@ -290,6 +321,10 @@ class ina2xx {
             }
           }
         }
+      }
+      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+        if (myData[n].bus > 1) myData[n].isvalid = false;
+        if (myData[n].addr < 0x40 || myData[n].addr > 0x4f) myData[n].isvalid = false;
       }
       if (retval) xTaskCreate(updateloop, devType[myDevTypeID], 4096, NULL, 12, NULL);
       // inventory();
@@ -325,11 +360,11 @@ class ina2xx {
       char devStatus[9];
       struct ina2xx_s *myData;
 
-      consolewriteln ((const char*) "Test: ina2xx - volts, amps and power");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No ina2xx sensors found.");
+        // consolewriteln ((const char*) " * No ina2xx sensors found.");
         return;
       }
+      consolewriteln ((const char*) "Test: ina2xx - volts, amps and power");
       myData = (struct ina2xx_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         if (myData[device].isvalid && myData[device].modelNr < sizeof(inaSigAddr)) {
@@ -455,6 +490,13 @@ class ina2xx {
             strcat  (xydata, "DS:watts:GAUGE:600:U:U ");
             strcat  (xydata, util_ftos (myData[device].watt_average, 3));
             strcat  (xydata, "\n");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[device].xfrmName, myData[device].uniquename);
+              strcat  (xydata, msgBuffer);
+              strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+              strcat  (xydata, util_ftos (myData[device].transform, 2));
+              strcat  (xydata, "\n");
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -464,7 +506,7 @@ class ina2xx {
     void printData()
     {
       struct ina2xx_s *myData;
-      char msgBuffer[40];
+      char msgBuffer[64];
       
       sprintf (msgBuffer, "ina2xx.dev %d", devTypeCount[myDevTypeID]);
       consolewriteln (msgBuffer);
@@ -525,6 +567,10 @@ class ina2xx {
             consolewrite (msgBuffer);
             consolewrite (util_ftos (((inaMaxShuntBits[myData[device].modelNr] * inaShuntLSB[myData[device].modelNr]) / myData[device].resistor), 3));
             consolewriteln (" +- Amps Max");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "ina2xx.%d.xfrm (%s) %s (%s)", device, myData[device].uniquename, util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              consolewriteln (msgBuffer);
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -555,6 +601,7 @@ class ina2xx {
           else if (strcmp(parameter,"blsb") == 0) retval = inaBusLSB[myData[devNr].modelNr];
           else if (strcmp(parameter,"slsb") == 0) retval = inaShuntLSB[myData[devNr].modelNr];
           else if (strcmp(parameter,"fsd")  == 0) retval = ((inaMaxShuntBits[myData[devNr].modelNr] * inaShuntLSB[myData[devNr].modelNr]) / myData[devNr].resistor);
+          else if (strcmp(parameter,"xfrm") == 0) retval = myData[devNr].transform;
           else retval = 0.00;
         }
         else retval=0.00;

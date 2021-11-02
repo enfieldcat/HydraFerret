@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-
+#include <rom/rtc.h>
 
 int util_str2int(char *string)
 {
@@ -117,11 +117,12 @@ void util_i2c_scan()
       // hold the wire semaphore for the duration of the scan
       for (int addr=3; addr< 0x78; addr++) {
         if (xSemaphoreTake(wiresemaphore[n], 30000) == pdTRUE) {
+          delay(10);   // delay to get noise free state
           I2C_bus[n].beginTransmission(addr);
-          delay(10);
           error = I2C_bus[n].endTransmission();
           xSemaphoreGive(wiresemaphore[n]);
-        } else error = 170;
+        }
+        else error = 170;
         if ((addr%16) == 0) {
           consolewriteln ("");
           sprintf(buffer, "%02X:", addr);
@@ -138,7 +139,6 @@ void util_i2c_scan()
         }
       }
       consolewriteln ("");
-      delay(10);
     }
   else consolewriteln ("bus is disabled");
   }
@@ -150,12 +150,13 @@ bool util_i2c_probe (int bus, int addr)
   byte error;
 
   if (!I2C_enabled[bus]) return false;
-  if (xSemaphoreTake(wiresemaphore[bus], 30000) == pdTRUE) {
-    I2C_bus[bus].beginTransmission(addr);
-    error = I2C_bus[bus].endTransmission();
-    xSemaphoreGive(wiresemaphore[bus]);
-  }
-  else error = 1;
+    if (xSemaphoreTake(wiresemaphore[bus], 30000) == pdTRUE) {
+      delay(10);
+      I2C_bus[bus].beginTransmission(addr);
+      error = I2C_bus[bus].endTransmission();
+      xSemaphoreGive(wiresemaphore[bus]);
+    }
+    else error = 1;
   if (error==0) return (true);
   return (false);
 }
@@ -163,10 +164,37 @@ bool util_i2c_probe (int bus, int addr)
 /*
 * Print the reason by which ESP32 has woken from sleep
 */
+void util_reset_reason (int16_t reason)
+{
+  switch ( reason)
+  {
+    case 1 : consolewriteln ("POWERON_RESET");break;          /**<1, Vbat power on reset*/
+    case 3 : consolewriteln ("SW_RESET");break;               /**<3, Software reset digital core*/
+    case 4 : consolewriteln ("OWDT_RESET");break;             /**<4, Legacy watch dog reset digital core*/
+    case 5 : consolewriteln ("DEEPSLEEP_RESET");break;        /**<5, Deep Sleep reset digital core*/
+    case 6 : consolewriteln ("SDIO_RESET");break;             /**<6, Reset by SLC module, reset digital core*/
+    case 7 : consolewriteln ("TG0WDT_SYS_RESET");break;       /**<7, Timer Group0 Watch dog reset digital core*/
+    case 8 : consolewriteln ("TG1WDT_SYS_RESET");break;       /**<8, Timer Group1 Watch dog reset digital core*/
+    case 9 : consolewriteln ("RTCWDT_SYS_RESET");break;       /**<9, RTC Watch dog Reset digital core*/
+    case 10 : consolewriteln ("INTRUSION_RESET");break;       /**<10, Instrusion tested to reset CPU*/
+    case 11 : consolewriteln ("TGWDT_CPU_RESET");break;       /**<11, Time Group reset CPU*/
+    case 12 : consolewriteln ("SW_CPU_RESET");break;          /**<12, Software reset CPU*/
+    case 13 : consolewriteln ("RTCWDT_CPU_RESET");break;      /**<13, RTC Watch dog Reset CPU*/
+    case 14 : consolewriteln ("EXT_CPU_RESET");break;         /**<14, for APP CPU, reseted by PRO CPU*/
+    case 15 : consolewriteln ("RTCWDT_BROWN_OUT_RESET");break;/**<15, Reset when the vdd voltage is not stable*/
+    case 16 : consolewriteln ("RTCWDT_RTC_RESET");break;      /**<16, RTC Watch dog reset digital core and rtc module*/
+    default : consolewriteln ("NO_MEAN");
+  }
+}
+
+
 void util_print_restart_cause()
 {
   esp_sleep_wakeup_cause_t wakeup_cause;
   wakeup_cause = esp_sleep_get_wakeup_cause();
+  int16_t cause;
+  // uint8_t check = 0;
+  
 
   switch(wakeup_cause)
   {
@@ -177,6 +205,19 @@ void util_print_restart_cause()
     case ESP_SLEEP_WAKEUP_ULP : consolewriteln ("Restart caused by ULP program"); break;
     // default : consolewriteln ("Restart was not caused by deep sleep"); break;
   }
+  consolewrite ("CPU0 reset reason: ");
+  cause = rtc_get_reset_reason(0);
+  util_reset_reason(cause);
+  // if (cause == 15 || cause == 12) check++;
+  consolewrite ("CPU1 reset reason: ");
+  cause = rtc_get_reset_reason(1);
+  util_reset_reason(cause);
+  // if (cause == 15 || cause == 12) check++;
+  // if (check>1) {
+  //   consolewriteln ("Warning: will attempt starting WiFi with brownout disabled.");
+  //   disable_brownout = true;
+  // }
+  // else disable_brownout = false;
 }
 
 /*
@@ -864,6 +905,35 @@ void util_format_spiffs()
   SPIFFS.format();
 }
 
+
+/*
+ * Deallocate memory used by i2c devices
+ */
+void util_deallocate (uint8_t deallocate)
+{
+  devTypeCount[deallocate] = 0;
+  if (xTimerIsTimerActive(devTypeTimer[deallocate]) != pdFALSE) {  // stop any timers
+    xTimerStop (devTypeTimer[deallocate], pdMS_TO_TICKS(5000));
+  }
+  delay (1000); // give time for any query of stale data to complete before freeing memory
+  if (devData[deallocate] != NULL) {
+    free (devData[deallocate]);
+    devData[deallocate] = NULL;
+  }
+  devRestartable[deallocate] = true;   // device is now restartable
+}
+
+
+/*
+ * Return the value of a variable, given the variable name
+ */
+float util_getvar(char *varName)
+{
+static rpn calc;
+return (calc.getvar(varName));
+}
+
+
 /*
  * Create timers for discovered devices
  */
@@ -872,12 +942,14 @@ void util_deviceTimerCreate(uint8_t n)
   static uint32_t default_interval;
   char msgBuffer[SENSOR_NAME_LEN];
   
-  if (n==0) default_interval = 300000;  // counter should only read for the full period
-  else {
-    sprintf (msgBuffer, "defaultPoll_%d", n);
-    default_interval = nvs_get_int (msgBuffer, default_interval) * 1000;
+  if (xTimerIsTimerActive(devTypeTimer[n]) == pdFALSE) {  // Only start if not already running
+    if (n==0) default_interval = 300000;                  // counter should only read for the full period
+    else {
+      sprintf (msgBuffer, "defaultPoll_%d", n);
+      default_interval = nvs_get_int (msgBuffer, default_interval) * 1000;
+    }
+    xTimerStart (devTypeTimer[n], pdMS_TO_TICKS(default_interval));
   }
-  xTimerStart (devTypeTimer[n], pdMS_TO_TICKS(default_interval));
 }
 
 
@@ -919,6 +991,8 @@ void util_start_devices()
   the_css811.begin();
   delay (INIT_DELAY);
   the_ina2xx.begin();
+  delay (INIT_DELAY);
+  the_pfc8583.begin();
   delay (INIT_DELAY);
   the_output.begin();
 }

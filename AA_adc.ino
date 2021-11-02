@@ -102,7 +102,17 @@ SOFTWARE.
                 myData[device].average = myData[device].accumulator / myData[device].readingCount;
                 myData[device].readingCount = 0;
                 myData[device].accumulator = 0;
-                xSemaphoreGive(devTypeSem[myDevTypeID]);
+              }
+              xSemaphoreGive(devTypeSem[myDevTypeID]);
+            }
+            for (uint8_t device=0; device<devTypeCount[myDevTypeID]; device++) {
+              struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+              if (xfrm_Ptr != NULL) {
+                float xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
+                  myData[device].transform = xfrmResult;
+                  xSemaphoreGive(devTypeSem[myDevTypeID]);
+                }
               }
             }
           }
@@ -174,7 +184,15 @@ SOFTWARE.
             myData[devNr].average      = 0;
             myData[devNr].averagedOver = 0;
             myData[devNr].readingCount = 0;
+            myData[devNr].transform    = 0;
             myData[devNr].state        = GREEN;
+            //
+            // get rpn transform
+            //
+            sprintf (msgBuffer, "adcXfm_%d", devNr);  // Transformation Logic
+            util_getLogic (msgBuffer, &myData[devNr].xfrmLogic);
+            sprintf (msgBuffer, "adcAlt_%d", devNr);  // Transformation Name
+            nvs_get_string (msgBuffer, myData[devNr].xfrmName, "transform", sizeof (myData[devNr].xfrmName));
             for (uint8_t level=0; level<3 ; level++) {
               sprintf (ruleName, "adc_%d%d", level, pin);  // Warning Logic
               nvs_get_string (ruleName, msgBuffer, "disable", sizeof(msgBuffer));
@@ -204,11 +222,11 @@ SOFTWARE.
       char devStatus[9];
       struct adc_s *myData;
 
-      consolewriteln ((const char*) "Test: adc - Analogue to digital");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No ADC sensors found.");
+        // consolewriteln ((const char*) " * No ADC sensors found.");
         return;
       }
+      consolewriteln ((const char*) "Test: adc - Analogue to digital");
       myData = (struct adc_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         sprintf (msgBuffer, " * OK %s.%d, name: %s, UOM: %s, attenuation %d (%sV FSD)", \
@@ -282,6 +300,10 @@ SOFTWARE.
             strcat  (xydata, xymonColour[currentState]);
             sprintf (msgBuffer, " %-16s %8s %s", myData[device].uniquename, util_ftos (((myData[device].average * myData[device].multiplier) + myData[device].offsetval), 3), myData[device].uom);
             strcat  (xydata, msgBuffer);
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, " %8s %s", util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              strcat  (xydata, msgBuffer);
+            }
             sprintf (msgBuffer, " - average over %d readings\n", myData[device].averagedOver);
             strcat  (xydata, msgBuffer);
           }
@@ -331,7 +353,7 @@ SOFTWARE.
         else if (strcmp (parameter,"asta") == 0) retval = myData[devNr].state;
         else if (strcmp (parameter,"volt") == 0) retval = estVolts (myData[devNr].average, myData[devNr].attenuation);
         else if (strcmp (parameter,"lasv") == 0) retval = estVolts (myData[devNr].lastVal, myData[devNr].attenuation);
-        else if (strcmp (parameter,"vsta") == 0) retval = myData[devNr].state;
+        else if (strcmp (parameter,"xfrm") == 0) retval = myData[devNr].transform;
         else retval=0.00;
         xSemaphoreGive(devTypeSem[myDevTypeID]);
       }
@@ -341,7 +363,7 @@ SOFTWARE.
     void printData()
     {
       struct adc_s *myData;
-      char msgBuffer[40];
+      char msgBuffer[64];
       
       sprintf (msgBuffer, "adc.dev %d", devTypeCount[myDevTypeID]);
       consolewriteln (msgBuffer);
@@ -386,10 +408,14 @@ SOFTWARE.
           consolewriteln (" V");
           sprintf (msgBuffer, "adc.%d.atte (%s) %d", myData[device].pin, myData[device].uniquename, myData[device].attenuation);
           consolewriteln (msgBuffer);
-          sprintf (msgBuffer, "adc.%d.offs (%s) %s", myData[device].pin, myData[device].uniquename, util_ftos (myData[device].offsetval, 3));
+          sprintf (msgBuffer, "adc.%d.offs (%s) %s", myData[device].pin, myData[device].uniquename, util_ftos (myData[device].offsetval,  3));
           consolewriteln (msgBuffer);
           sprintf (msgBuffer, "adc.%d.mult (%s) %s", myData[device].pin, myData[device].uniquename, util_ftos (myData[device].multiplier, 6));
           consolewriteln (msgBuffer);
+          if (myData[device].xfrmLogic != NULL) {
+            sprintf (msgBuffer, "adc.%d.xfrm (%s) %s (%s)", myData[device].pin, myData[device].uniquename, util_ftos (myData[device].transform, 3), myData[device].xfrmName);
+            consolewriteln (msgBuffer);
+          }
           sprintf (msgBuffer, "adc.%d.asta (%s) %d", myData[device].pin, myData[device].uniquename, myData[device].state);
           consolewriteln (msgBuffer);
         }
@@ -413,6 +439,13 @@ SOFTWARE.
             strcat  (xydata, msgBuffer);
             strcat  (xydata, util_ftos (((myData[device].average * myData[device].multiplier) + myData[device].offsetval), 1));
             strcat  (xydata, "\n");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[device].xfrmName, myData[device].uniquename);
+              strcat  (xydata, msgBuffer);
+              strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+              strcat  (xydata, util_ftos (myData[device].transform, 2));
+              strcat  (xydata, "\n");
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);

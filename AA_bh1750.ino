@@ -30,6 +30,7 @@ class bh1750 {
 
     static void  updateloop(void *pvParameters)
     {
+      float xfrmResult;
       uint8_t myDevTypeID = 255;
       uint8_t queueData;
       struct bh1750_s *myData;
@@ -46,6 +47,7 @@ class bh1750 {
       loopCount = 0;
       myDevTypeID = util_get_dev_type("bh1750");
       if (myDevTypeID!=255) {
+        devRestartable[myDevTypeID] = false;
         util_deviceTimerCreate(myDevTypeID);
         // set hi selector value and scaling factors
         for (loopCount=0; loopCount<(sizeof(resolutionMode)/sizeof(uint8_t)); loopCount++){
@@ -71,11 +73,12 @@ class bh1750 {
             myData[device].lux_accum     = 0.0;
             myData[device].lux_last      = 0.0;
             myData[device].gear          = 1;
+            myData[device].transform     = 0.0;
           }
           xSemaphoreGive(devTypeSem[myDevTypeID]);
         }
         // loop forever collecting data
-        while (true) {
+        while (devTypeCount[myDevTypeID]>0) {
           if (xQueueReceive(devTypeQueue[myDevTypeID], &queueData, pdMS_TO_TICKS(pollInterval+1000)) != pdPASS) {
             if (ansiTerm) displayAnsi(3);
             consolewriteln ("Missing bh1750 signal");
@@ -136,6 +139,14 @@ class bh1750 {
                   loopCount = 0;
                   xSemaphoreGive(devTypeSem[myDevTypeID]);
                 }
+                struct rpnLogic_s *xfrm_Ptr = myData[device].xfrmLogic;
+                if (xfrm_Ptr != NULL) {
+                  xfrmResult = rpn_calc(xfrm_Ptr->count, xfrm_Ptr->term);
+                  if (xSemaphoreTake(devTypeSem[myDevTypeID], pdMS_TO_TICKS(pollInterval-500)) == pdTRUE) {
+                    myData[device].transform = xfrmResult;
+                    xSemaphoreGive(devTypeSem[myDevTypeID]);
+                  }
+                }
               }
             }
           }
@@ -145,6 +156,9 @@ class bh1750 {
         if (ansiTerm) displayAnsi(3);
         consolewriteln ("Could not determine bh1750 type ID for update loop");
         if (ansiTerm) displayAnsi(1);
+      }
+      if (myDevTypeID!=255) {
+        util_deallocate (myDevTypeID);
       }
       vTaskDelete( NULL );
     }
@@ -181,7 +195,7 @@ class bh1750 {
         }
       }
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) "No bh1750 sensors found.");
+        // consolewriteln ((const char*) "No bh1750 sensors found.");
         return(false);  // nothing found!
       }
       // set up and inittialise structures
@@ -203,6 +217,13 @@ class bh1750 {
             retval = true;
             myData[devNr].isvalid = true;
             myData[devNr].state = 0;
+            //
+            // get rpn transform
+            //
+            sprintf (msgBuffer, "bh1750Xfm_%d", devNr);  // Transformation Logic
+            util_getLogic (msgBuffer, &myData[devNr].xfrmLogic);
+            sprintf (msgBuffer, "bh1750Alt_%d", devNr);  // Transformation Name
+            nvs_get_string (msgBuffer, myData[devNr].xfrmName, "transform", sizeof (myData[devNr].xfrmName));
             for (uint8_t level=0; level<3 ; level++) {
                sprintf (ruleName, "bh17lux_%d%d", level, devNr);  // Warning Logic
                nvs_get_string (ruleName, msgBuffer, "disable", sizeof(msgBuffer));
@@ -221,6 +242,10 @@ class bh1750 {
             devNr++;
           }
         }
+      }
+      for (uint8_t n=0; n<devTypeCount[myDevTypeID]; n++) {
+        if (myData[n].bus > 1) myData[n].isvalid = false;
+        if (myData[n].addr != dev_addr[0] && myData[n].addr != dev_addr[1]) myData[n].isvalid = false;
       }
       if (retval) xTaskCreate(updateloop, devType[myDevTypeID], 4096, NULL, 12, NULL);
       // inventory();
@@ -257,11 +282,11 @@ class bh1750 {
       char devStatus[9];
       struct bh1750_s *myData;
 
-      consolewriteln ((const char*) "Test: bh1750 - Light/Lux");
       if (devTypeCount[myDevTypeID] == 0) {
-        consolewriteln ((const char*) " * No bh1750 sensors found.");
+        // consolewriteln ((const char*) " * No bh1750 sensors found.");
         return;
       }
+      consolewriteln ((const char*) "Test: bh1750 - Light/Lux");
       myData = (struct bh1750_s*) devData[myDevTypeID];
       for (int device=0; device<devTypeCount[myDevTypeID]; device++) {
         if (myData[device].isvalid) {
@@ -319,7 +344,13 @@ class bh1750 {
             strcat (xydata, xymonColour[currentState]);
             sprintf (msgBuffer, " %-16s %8s lux", myData[device].uniquename, util_ftos (myData[device].lux_average, 1));
             strcat  (xydata, msgBuffer);
-            sprintf (msgBuffer, "  %8s ftcd - average over %d readings\n", util_ftos (ftcd, 2), myData[device].averagedOver);
+            sprintf (msgBuffer, "  %8s ftcd", util_ftos (ftcd, 2));
+            strcat  (xydata, msgBuffer);
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "  %8s %s", util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              strcat  (xydata, msgBuffer);
+            }
+            sprintf (msgBuffer, " - average over %d readings\n", myData[device].averagedOver);
             strcat  (xydata, msgBuffer);
           }
           else {
@@ -348,6 +379,13 @@ class bh1750 {
             strcat  (xydata, "DS:index:GAUGE:600:U:U ");
             strcat  (xydata, util_ftos (myData[device].lux_average, 1));
             strcat  (xydata, "\n");
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "[%s.%s.rrd]\n", myData[device].xfrmName, myData[device].uniquename);
+              strcat  (xydata, msgBuffer);
+              strcat  (xydata, "DS:val:GAUGE:600:U:U ");
+              strcat  (xydata, util_ftos (myData[device].transform, 2));
+              strcat  (xydata, "\n");
+            }
           }
         }
         xSemaphoreGive(devTypeSem[myDevTypeID]);
@@ -357,7 +395,7 @@ class bh1750 {
     void printData()
     {
       struct bh1750_s *myData;
-      char msgBuffer[40];
+      char msgBuffer[64];
       
       sprintf (msgBuffer, "bh1750.dev %d", devTypeCount[myDevTypeID]);
       consolewriteln (msgBuffer);
@@ -379,6 +417,10 @@ class bh1750 {
             sprintf (msgBuffer, "bh1750.%d.opac (%s) ", device, myData[device].uniquename);
             consolewrite (msgBuffer);
             consolewriteln (util_ftos (myData[device].opacity, 2));
+            if (myData[device].xfrmLogic != NULL) {
+              sprintf (msgBuffer, "bh1750.%d.xfrm (%s) %s (%s)", device, myData[device].uniquename, util_ftos (myData[device].transform, 2), myData[device].xfrmName);
+              consolewriteln (msgBuffer);
+            }
             sprintf (msgBuffer, "bh1750.%d.lsta (%s) ", device, myData[device].uniquename);
             consolewrite (msgBuffer);
             consolewrite (util_ftos (myData[device].state, 0));
@@ -406,6 +448,7 @@ class bh1750 {
           else if (strcmp(parameter,"lasl") == 0) retval = myData[devNr].lux_last;
           else if (strcmp(parameter,"opac") == 0) retval = myData[devNr].opacity;
           else if (strcmp(parameter,"lsta") == 0) retval = myData[devNr].state;
+          else if (strcmp(parameter,"xfrm") == 0) retval = myData[devNr].transform;
           else retval = 0.00;
         }
         else retval=0.00;
